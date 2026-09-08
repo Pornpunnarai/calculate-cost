@@ -4,7 +4,7 @@ import { useEffect, useState } from "react";
 import { ErrorBanner } from "@/components/error-banner";
 import { unitCost } from "@/lib/costing";
 import { formatBaht } from "@/lib/money";
-import { asNumber, createBrowserClient } from "@/lib/supabase/client";
+import { asNumber, asOne, createBrowserClient } from "@/lib/supabase/client";
 import type { Ingredient, Unit } from "@/lib/types";
 import {
   canChangeIngredientUnit,
@@ -27,38 +27,51 @@ export default function IngredientsPage() {
 
   async function load() {
     setError("");
-    const supabase = createBrowserClient();
-    const [unitsRes, ingredientsRes, usedRes] = await Promise.all([
-      supabase.from("units").select("*").order("created_at"),
-      supabase
-        .from("ingredients")
-        .select("*, unit:units(*)")
-        .order("created_at"),
-      supabase.from("product_ingredients").select("ingredient_id"),
-    ]);
-    if (unitsRes.error || ingredientsRes.error || usedRes.error) {
-      setError("โหลดวัตถุดิบไม่สำเร็จ");
-      return;
-    }
-    const unitList = (unitsRes.data ?? []) as Unit[];
-    setUnits(unitList);
-    if (!unitId && unitList[0]) {
-      setUnitId(unitList[0].id);
-    }
-    setItems(
-      (ingredientsRes.data ?? []).map((row) => ({
-        ...row,
-        purchase_quantity: asNumber(row.purchase_quantity),
-        purchase_price: asNumber(row.purchase_price),
-      })) as IngredientRow[],
-    );
-    setUsedIds(
-      new Set(
-        ((usedRes.data ?? []) as { ingredient_id: string }[]).map(
-          (row) => row.ingredient_id,
+    try {
+      const supabase = createBrowserClient();
+      const [unitsRes, ingredientsRes, usedRes] = await Promise.all([
+        supabase.from("units").select("*").order("created_at"),
+        supabase
+          .from("ingredients")
+          .select("*, unit:units(*)")
+          .order("created_at"),
+        supabase.from("product_ingredients").select("ingredient_id"),
+      ]);
+      if (unitsRes.error || ingredientsRes.error || usedRes.error) {
+        setError("โหลดวัตถุดิบไม่สำเร็จ");
+        return;
+      }
+      const unitList = (unitsRes.data ?? []) as Unit[];
+      setUnits(unitList);
+      if (!unitId && unitList[0]) {
+        setUnitId(unitList[0].id);
+      }
+      setItems(
+        (ingredientsRes.data ?? []).flatMap((row) => {
+          const unit = asOne<Unit>(row.unit as Unit | Unit[] | null);
+          if (!unit) {
+            return [];
+          }
+          return [
+            {
+              ...row,
+              unit,
+              purchase_quantity: asNumber(row.purchase_quantity),
+              purchase_price: asNumber(row.purchase_price),
+            } as IngredientRow,
+          ];
+        }),
+      );
+      setUsedIds(
+        new Set(
+          ((usedRes.data ?? []) as { ingredient_id: string }[]).map(
+            (row) => row.ingredient_id,
+          ),
         ),
-      ),
-    );
+      );
+    } catch {
+      setError("โหลดวัตถุดิบไม่สำเร็จ");
+    }
   }
 
   useEffect(() => {
@@ -79,76 +92,87 @@ export default function IngredientsPage() {
   async function onSubmit(event: React.FormEvent) {
     event.preventDefault();
     setError("");
-    const purchaseQuantity = Number(quantity);
-    const purchasePrice = Number(price);
-    if (!name.trim() || !isPositiveNumber(purchaseQuantity) || !isPositiveNumber(purchasePrice) || !unitId) {
-      setError("กรอกชื่อ ปริมาณ และราคาให้มากกว่า 0");
-      return;
-    }
-    const supabase = createBrowserClient();
-    if (editingId) {
-      const used = usedIds.has(editingId);
-      if (!canChangeIngredientUnit(used ? 1 : 0)) {
-        const current = items.find((item) => item.id === editingId);
-        if (current && current.purchase_unit_id !== unitId) {
-          setError("แก้หน่วยไม่ได้ เพราะมีเมนูใช้วัตถุดิบนี้อยู่");
+    try {
+      const purchaseQuantity = Number(quantity);
+      const purchasePrice = Number(price);
+      if (!name.trim() || !isPositiveNumber(purchaseQuantity) || !isPositiveNumber(purchasePrice) || !unitId) {
+        setError("กรอกชื่อ ปริมาณ และราคาให้มากกว่า 0");
+        return;
+      }
+      const supabase = createBrowserClient();
+      if (editingId) {
+        const used = usedIds.has(editingId);
+        if (!canChangeIngredientUnit(used ? 1 : 0)) {
+          const current = items.find((item) => item.id === editingId);
+          if (current && current.purchase_unit_id !== unitId) {
+            setError("แก้หน่วยไม่ได้ เพราะมีเมนูใช้วัตถุดิบนี้อยู่");
+            return;
+          }
+        }
+        const { error: updateError } = await supabase
+          .from("ingredients")
+          .update({
+            name: name.trim(),
+            purchase_quantity: purchaseQuantity,
+            purchase_unit_id: unitId,
+            purchase_price: purchasePrice,
+            updated_at: new Date().toISOString(),
+          })
+          .eq("id", editingId);
+        if (updateError) {
+          setError("บันทึกไม่สำเร็จ");
           return;
         }
-      }
-      const { error: updateError } = await supabase
-        .from("ingredients")
-        .update({
+      } else {
+        const { error: insertError } = await supabase.from("ingredients").insert({
           name: name.trim(),
           purchase_quantity: purchaseQuantity,
           purchase_unit_id: unitId,
           purchase_price: purchasePrice,
-          updated_at: new Date().toISOString(),
-        })
-        .eq("id", editingId);
-      if (updateError) {
-        setError("บันทึกไม่สำเร็จ");
-        return;
+        });
+        if (insertError) {
+          setError("บันทึกไม่สำเร็จ");
+          return;
+        }
       }
-    } else {
-      const { error: insertError } = await supabase.from("ingredients").insert({
-        name: name.trim(),
-        purchase_quantity: purchaseQuantity,
-        purchase_unit_id: unitId,
-        purchase_price: purchasePrice,
-      });
-      if (insertError) {
-        setError("บันทึกไม่สำเร็จ");
-        return;
-      }
+      resetForm();
+      await load();
+    } catch {
+      setError("บันทึกไม่สำเร็จ");
     }
-    resetForm();
-    await load();
   }
 
   async function onDelete(item: IngredientRow) {
     setError("");
-    const supabase = createBrowserClient();
-    const { count, error: countError } = await supabase
-      .from("product_ingredients")
-      .select("id", { count: "exact", head: true })
-      .eq("ingredient_id", item.id);
-    if (countError) {
+    try {
+      const supabase = createBrowserClient();
+      const { count, error: countError } = await supabase
+        .from("product_ingredients")
+        .select("id", { count: "exact", head: true })
+        .eq("ingredient_id", item.id);
+      if (countError) {
+        setError("ลบไม่สำเร็จ");
+        return;
+      }
+      if (!canDeleteIngredient(count ?? 0)) {
+        setError("ลบไม่ได้ เพราะมีเมนูใช้วัตถุดิบนี้อยู่");
+        return;
+      }
+      const { error: deleteError } = await supabase
+        .from("ingredients")
+        .delete()
+        .eq("id", item.id);
+      if (deleteError) {
+        setError("ลบไม่สำเร็จ");
+        return;
+      }
+      if (editingId === item.id) {
+        resetForm();
+      }
+      await load();
+    } catch {
       setError("ลบไม่สำเร็จ");
-      return;
     }
-    if (!canDeleteIngredient(count ?? 0)) {
-      setError("ลบไม่ได้ เพราะมีเมนูใช้วัตถุดิบนี้อยู่");
-      return;
-    }
-    const { error: deleteError } = await supabase
-      .from("ingredients")
-      .delete()
-      .eq("id", item.id);
-    if (deleteError) {
-      setError("ลบไม่สำเร็จ");
-      return;
-    }
-    await load();
   }
 
   function startEdit(item: IngredientRow) {

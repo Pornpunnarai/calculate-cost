@@ -14,16 +14,20 @@ export default function UnitsPage() {
 
   async function load() {
     setError("");
-    const supabase = createBrowserClient();
-    const { data, error: loadError } = await supabase
-      .from("units")
-      .select("*")
-      .order("created_at");
-    if (loadError) {
+    try {
+      const supabase = createBrowserClient();
+      const { data, error: loadError } = await supabase
+        .from("units")
+        .select("*")
+        .order("created_at");
+      if (loadError) {
+        setError("โหลดหน่วยไม่สำเร็จ");
+        return;
+      }
+      setUnits((data ?? []) as Unit[]);
+    } catch {
       setError("โหลดหน่วยไม่สำเร็จ");
-      return;
     }
-    setUnits((data ?? []) as Unit[]);
   }
 
   useEffect(() => {
@@ -33,53 +37,61 @@ export default function UnitsPage() {
   async function onSubmit(event: React.FormEvent) {
     event.preventDefault();
     setError("");
-    if (!name.trim() || !symbol.trim()) {
-      setError("กรอกชื่อและสัญลักษณ์หน่วย");
-      return;
-    }
-    const supabase = createBrowserClient();
-    const { error: insertError } = await supabase.from("units").insert({
-      name: name.trim(),
-      symbol: symbol.trim(),
-      is_builtin: false,
-    });
-    if (insertError) {
+    try {
+      if (!name.trim() || !symbol.trim()) {
+        setError("กรอกชื่อและสัญลักษณ์หน่วย");
+        return;
+      }
+      const supabase = createBrowserClient();
+      const { error: insertError } = await supabase.from("units").insert({
+        name: name.trim(),
+        symbol: symbol.trim(),
+        is_builtin: false,
+      });
+      if (insertError) {
+        setError("บันทึกไม่สำเร็จ");
+        return;
+      }
+      setName("");
+      setSymbol("");
+      await load();
+    } catch {
       setError("บันทึกไม่สำเร็จ");
-      return;
     }
-    setName("");
-    setSymbol("");
-    await load();
   }
 
   async function onDelete(unit: Unit) {
     setError("");
-    const supabase = createBrowserClient();
-    const { count, error: countError } = await supabase
-      .from("ingredients")
-      .select("id", { count: "exact", head: true })
-      .eq("purchase_unit_id", unit.id);
-    if (countError) {
+    try {
+      const supabase = createBrowserClient();
+      const { count, error: countError } = await supabase
+        .from("ingredients")
+        .select("id", { count: "exact", head: true })
+        .eq("purchase_unit_id", unit.id);
+      if (countError) {
+        setError("ลบไม่สำเร็จ");
+        return;
+      }
+      if (!canDeleteUnit(unit.is_builtin, count ?? 0)) {
+        setError(
+          unit.is_builtin
+            ? "ลบหน่วยระบบไม่ได้"
+            : "ลบไม่ได้ เพราะมีวัตถุดิบใช้หน่วยนี้อยู่",
+        );
+        return;
+      }
+      const { error: deleteError } = await supabase
+        .from("units")
+        .delete()
+        .eq("id", unit.id);
+      if (deleteError) {
+        setError("ลบไม่สำเร็จ");
+        return;
+      }
+      await load();
+    } catch {
       setError("ลบไม่สำเร็จ");
-      return;
     }
-    if (!canDeleteUnit(unit.is_builtin, count ?? 0)) {
-      setError(
-        unit.is_builtin
-          ? "ลบหน่วยระบบไม่ได้"
-          : "ลบไม่ได้ เพราะมีวัตถุดิบใช้หน่วยนี้อยู่",
-      );
-      return;
-    }
-    const { error: deleteError } = await supabase
-      .from("units")
-      .delete()
-      .eq("id", unit.id);
-    if (deleteError) {
-      setError("ลบไม่สำเร็จ");
-      return;
-    }
-    await load();
   }
 
   return (
@@ -116,9 +128,11 @@ export default function UnitsPage() {
               <td>{unit.name}</td>
               <td>{unit.symbol}</td>
               <td>
-                <button type="button" onClick={() => void onDelete(unit)}>
-                  ลบ
-                </button>
+                {unit.is_builtin ? null : (
+                  <button type="button" onClick={() => void onDelete(unit)}>
+                    ลบ
+                  </button>
+                )}
               </td>
             </tr>
           ))}

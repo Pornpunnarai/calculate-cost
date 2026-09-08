@@ -6,7 +6,7 @@ import { ErrorBanner } from "@/components/error-banner";
 import { ProductForm } from "@/app/products/product-form";
 import { productCost } from "@/lib/costing";
 import { formatBaht } from "@/lib/money";
-import { asNumber, createBrowserClient } from "@/lib/supabase/client";
+import { asNumber, asOne, createBrowserClient } from "@/lib/supabase/client";
 import type {
   Ingredient,
   Product,
@@ -29,43 +29,56 @@ export default function ProductsPage() {
 
   async function load() {
     setError("");
-    const supabase = createBrowserClient();
-    const [ingRes, prodRes, lineRes, chRes] = await Promise.all([
-      supabase.from("ingredients").select("*, unit:units(*)").order("created_at"),
-      supabase.from("products").select("*").order("created_at"),
-      supabase.from("product_ingredients").select("*"),
-      supabase.from("sales_channels").select("*").order("created_at"),
-    ]);
-    if (ingRes.error || prodRes.error || lineRes.error || chRes.error) {
+    try {
+      const supabase = createBrowserClient();
+      const [ingRes, prodRes, lineRes, chRes] = await Promise.all([
+        supabase.from("ingredients").select("*, unit:units(*)").order("created_at"),
+        supabase.from("products").select("*").order("created_at"),
+        supabase.from("product_ingredients").select("*"),
+        supabase.from("sales_channels").select("*").order("created_at"),
+      ]);
+      if (ingRes.error || prodRes.error || lineRes.error || chRes.error) {
+        setError("โหลดเมนูไม่สำเร็จ");
+        return;
+      }
+      setIngredients(
+        (ingRes.data ?? []).flatMap((row) => {
+          const unit = asOne<Unit>(row.unit as Unit | Unit[] | null);
+          if (!unit) {
+            return [];
+          }
+          return [
+            {
+              ...row,
+              unit,
+              purchase_quantity: asNumber(row.purchase_quantity),
+              purchase_price: asNumber(row.purchase_price),
+            } as IngredientRow,
+          ];
+        }),
+      );
+      setProducts(
+        (prodRes.data ?? []).map((row) => ({
+          ...row,
+          selling_price:
+            row.selling_price == null ? null : asNumber(row.selling_price),
+        })) as Product[],
+      );
+      setLines(
+        (lineRes.data ?? []).map((row) => ({
+          ...row,
+          quantity: asNumber(row.quantity),
+        })) as ProductIngredient[],
+      );
+      setChannels(
+        (chRes.data ?? []).map((row) => ({
+          ...row,
+          fee_percent: asNumber(row.fee_percent),
+        })) as SalesChannel[],
+      );
+    } catch {
       setError("โหลดเมนูไม่สำเร็จ");
-      return;
     }
-    setIngredients(
-      (ingRes.data ?? []).map((row) => ({
-        ...row,
-        purchase_quantity: asNumber(row.purchase_quantity),
-        purchase_price: asNumber(row.purchase_price),
-      })) as IngredientRow[],
-    );
-    setProducts(
-      (prodRes.data ?? []).map((row) => ({
-        ...row,
-        selling_price:
-          row.selling_price == null ? null : asNumber(row.selling_price),
-      })) as Product[],
-    );
-    setLines(
-      (lineRes.data ?? []).map((row) => ({
-        ...row,
-        quantity: asNumber(row.quantity),
-      })) as ProductIngredient[],
-    );
-    setChannels(
-      (chRes.data ?? []).map((row) => ({
-        ...row,
-        fee_percent: asNumber(row.fee_percent),
-      })) as SalesChannel[],
-    );
   }
 
   useEffect(() => {
@@ -95,13 +108,17 @@ export default function ProductsPage() {
 
   async function onDelete(id: string) {
     setError("");
-    const supabase = createBrowserClient();
-    const { error: deleteError } = await supabase.from("products").delete().eq("id", id);
-    if (deleteError) {
+    try {
+      const supabase = createBrowserClient();
+      const { error: deleteError } = await supabase.from("products").delete().eq("id", id);
+      if (deleteError) {
+        setError("ลบไม่สำเร็จ");
+        return;
+      }
+      await load();
+    } catch {
       setError("ลบไม่สำเร็จ");
-      return;
     }
-    await load();
   }
 
   const allowCreate = canCreateProduct(ingredients.length);

@@ -50,6 +50,23 @@ alter table products enable row level security;
 alter table product_ingredients enable row level security;
 alter table sales_channels enable row level security;
 
+create or replace function prevent_delete_builtin_units()
+returns trigger
+language plpgsql
+as $$
+begin
+  if old.is_builtin then
+    raise exception 'cannot delete builtin unit';
+  end if;
+  return old;
+end;
+$$;
+
+create trigger prevent_delete_builtin_units
+before delete on units
+for each row
+execute function prevent_delete_builtin_units();
+
 create policy "units_all" on units for all to anon, authenticated using (true) with check (true);
 create policy "ingredients_all" on ingredients for all to anon, authenticated using (true) with check (true);
 create policy "products_all" on products for all to anon, authenticated using (true) with check (true);

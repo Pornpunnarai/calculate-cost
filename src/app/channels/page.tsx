@@ -14,21 +14,25 @@ export default function ChannelsPage() {
 
   async function load() {
     setError("");
-    const supabase = createBrowserClient();
-    const { data, error: loadError } = await supabase
-      .from("sales_channels")
-      .select("*")
-      .order("created_at");
-    if (loadError) {
+    try {
+      const supabase = createBrowserClient();
+      const { data, error: loadError } = await supabase
+        .from("sales_channels")
+        .select("*")
+        .order("created_at");
+      if (loadError) {
+        setError("โหลดช่องทางขายไม่สำเร็จ");
+        return;
+      }
+      setChannels(
+        (data ?? []).map((row) => ({
+          ...row,
+          fee_percent: asNumber(row.fee_percent),
+        })) as SalesChannel[],
+      );
+    } catch {
       setError("โหลดช่องทางขายไม่สำเร็จ");
-      return;
     }
-    setChannels(
-      (data ?? []).map((row) => ({
-        ...row,
-        fee_percent: asNumber(row.fee_percent),
-      })) as SalesChannel[],
-    );
   }
 
   useEffect(() => {
@@ -38,37 +42,45 @@ export default function ChannelsPage() {
   async function onSubmit(event: React.FormEvent) {
     event.preventDefault();
     setError("");
-    const feePercent = Number(fee);
-    if (!name.trim() || !isValidFeePercent(feePercent)) {
-      setError("กรอกชื่อ และ GP% ระหว่าง 0 ถึง 100");
-      return;
-    }
-    const supabase = createBrowserClient();
-    const { error: insertError } = await supabase.from("sales_channels").insert({
-      name: name.trim(),
-      fee_percent: feePercent,
-    });
-    if (insertError) {
+    try {
+      if (!name.trim() || fee.trim() === "" || !isValidFeePercent(Number(fee))) {
+        setError("กรอกชื่อ และ GP% ระหว่าง 0 ถึง 100");
+        return;
+      }
+      const feePercent = Number(fee);
+      const supabase = createBrowserClient();
+      const { error: insertError } = await supabase.from("sales_channels").insert({
+        name: name.trim(),
+        fee_percent: feePercent,
+      });
+      if (insertError) {
+        setError("บันทึกไม่สำเร็จ");
+        return;
+      }
+      setName("");
+      setFee("");
+      await load();
+    } catch {
       setError("บันทึกไม่สำเร็จ");
-      return;
     }
-    setName("");
-    setFee("");
-    await load();
   }
 
   async function onDelete(id: string) {
     setError("");
-    const supabase = createBrowserClient();
-    const { error: deleteError } = await supabase
-      .from("sales_channels")
-      .delete()
-      .eq("id", id);
-    if (deleteError) {
+    try {
+      const supabase = createBrowserClient();
+      const { error: deleteError } = await supabase
+        .from("sales_channels")
+        .delete()
+        .eq("id", id);
+      if (deleteError) {
+        setError("ลบไม่สำเร็จ");
+        return;
+      }
+      await load();
+    } catch {
       setError("ลบไม่สำเร็จ");
-      return;
     }
-    await load();
   }
 
   return (

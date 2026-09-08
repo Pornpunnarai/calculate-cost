@@ -13,6 +13,18 @@ describe("roundHalfUp", () => {
   it("rounds 1.224 to 1.22", () => {
     expect(roundHalfUp(1.224)).toBe(1.22);
   });
+
+  it("rounds 1.005 to 1.01", () => {
+    expect(roundHalfUp(1.005)).toBe(1.01);
+  });
+
+  it("rounds 2.675 to 2.68", () => {
+    expect(roundHalfUp(2.675)).toBe(2.68);
+  });
+
+  it("rounds -1.225 away from zero to -1.23", () => {
+    expect(roundHalfUp(-1.225)).toBe(-1.23);
+  });
 });
 
 describe("formatBaht", () => {

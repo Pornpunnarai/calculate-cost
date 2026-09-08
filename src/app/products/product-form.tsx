@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useMemo, useRef, useState } from "react";
 import { ErrorBanner } from "@/components/error-banner";
 import { channelProfit, lineCost, productCost } from "@/lib/costing";
 import { formatBaht } from "@/lib/money";
@@ -30,6 +30,7 @@ export function ProductForm({
   onSaved: () => void;
   onCancel: () => void;
 }) {
+  const savedProductIdRef = useRef<string | null>(existing?.id ?? null);
   const [name, setName] = useState(existing?.name ?? "");
   const [lines, setLines] = useState<RecipeLine[]>(
     existingLines.map((line) => ({
@@ -117,7 +118,7 @@ export function ProductForm({
         }
       }
       const supabase = createBrowserClient();
-      let productId = existing?.id;
+      let productId = savedProductIdRef.current;
       if (productId) {
         const { error: updateError } = await supabase
           .from("products")
@@ -128,14 +129,6 @@ export function ProductForm({
           })
           .eq("id", productId);
         if (updateError) {
-          setError("บันทึกไม่สำเร็จ");
-          return;
-        }
-        const { error: deleteLinesError } = await supabase
-          .from("product_ingredients")
-          .delete()
-          .eq("product_id", productId);
-        if (deleteLinesError) {
           setError("บันทึกไม่สำเร็จ");
           return;
         }
@@ -153,21 +146,44 @@ export function ProductForm({
           return;
         }
         productId = data.id as string;
+        savedProductIdRef.current = productId;
       }
+      const ingredientIds = lines.map((line) => line.ingredientId);
       if (lines.length > 0) {
-        const { error: linesError } = await supabase.from("product_ingredients").insert(
+        const { error: linesError } = await supabase.from("product_ingredients").upsert(
           lines.map((line) => ({
             product_id: productId,
             ingredient_id: line.ingredientId,
             quantity: parsePositiveQuantity(line.quantity),
           })),
+          { onConflict: "product_id,ingredient_id" },
         );
         if (linesError) {
           setError("บันทึกไม่สำเร็จ");
           return;
         }
+        const { error: deleteRemovedError } = await supabase
+          .from("product_ingredients")
+          .delete()
+          .eq("product_id", productId)
+          .not("ingredient_id", "in", `(${ingredientIds.join(",")})`);
+        if (deleteRemovedError) {
+          setError("บันทึกไม่สำเร็จ");
+          return;
+        }
+      } else {
+        const { error: deleteAllError } = await supabase
+          .from("product_ingredients")
+          .delete()
+          .eq("product_id", productId);
+        if (deleteAllError) {
+          setError("บันทึกไม่สำเร็จ");
+          return;
+        }
       }
       onSaved();
+    } catch {
+      setError("บันทึกไม่สำเร็จ");
     } finally {
       setSaving(false);
     }

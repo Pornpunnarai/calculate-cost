@@ -14,3 +14,10 @@ export function createBrowserClient() {
 export function asNumber(value: number | string): number {
   return typeof value === "number" ? value : Number(value);
 }
+
+export function asOne<T>(value: T | T[] | null | undefined): T | null {
+  if (Array.isArray(value)) {
+    return value[0] ?? null;
+  }
+  return value ?? null;
+}
