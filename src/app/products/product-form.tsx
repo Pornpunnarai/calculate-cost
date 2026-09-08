@@ -41,6 +41,7 @@ export function ProductForm({
     existing?.selling_price == null ? "" : String(existing.selling_price),
   );
   const [error, setError] = useState("");
+  const [saving, setSaving] = useState(false);
 
   const selectedIds = new Set(lines.map((line) => line.ingredientId));
 
@@ -94,74 +95,82 @@ export function ProductForm({
 
   async function onSubmit(event: React.FormEvent) {
     event.preventDefault();
+    if (saving) {
+      return;
+    }
+    setSaving(true);
     setError("");
-    if (!name.trim()) {
-      setError("กรอกชื่อเมนู");
-      return;
-    }
-    const parsedPrice = parseOptionalSellingPrice(sellingPriceRaw);
-    if (!parsedPrice.ok) {
-      setError("ราคาขายต้องมากกว่า 0 หรือเว้นว่างถ้ายังไม่ตั้งราคา");
-      return;
-    }
-    for (const line of lines) {
-      if (parsePositiveQuantity(line.quantity) == null) {
-        setError("ปริมาณในสูตรต้องมากกว่า 0");
+    try {
+      if (!name.trim()) {
+        setError("กรอกชื่อเมนู");
         return;
       }
+      const parsedPrice = parseOptionalSellingPrice(sellingPriceRaw);
+      if (!parsedPrice.ok) {
+        setError("ราคาขายต้องมากกว่า 0 หรือเว้นว่างถ้ายังไม่ตั้งราคา");
+        return;
+      }
+      for (const line of lines) {
+        if (parsePositiveQuantity(line.quantity) == null) {
+          setError("ปริมาณในสูตรต้องมากกว่า 0");
+          return;
+        }
+      }
+      const supabase = createBrowserClient();
+      let productId = existing?.id;
+      if (productId) {
+        const { error: updateError } = await supabase
+          .from("products")
+          .update({
+            name: name.trim(),
+            selling_price: parsedPrice.value,
+            updated_at: new Date().toISOString(),
+          })
+          .eq("id", productId);
+        if (updateError) {
+          setError("บันทึกไม่สำเร็จ");
+          return;
+        }
+        const { error: deleteLinesError } = await supabase
+          .from("product_ingredients")
+          .delete()
+          .eq("product_id", productId);
+        if (deleteLinesError) {
+          setError("บันทึกไม่สำเร็จ");
+          return;
+        }
+      } else {
+        const { data, error: insertError } = await supabase
+          .from("products")
+          .insert({
+            name: name.trim(),
+            selling_price: parsedPrice.value,
+          })
+          .select("id")
+          .single();
+        if (insertError || !data) {
+          setError("บันทึกไม่สำเร็จ");
+          return;
+        }
+        productId = data.id as string;
+      }
+      if (lines.length > 0) {
+        const { error: linesError } = await supabase.from("product_ingredients").insert(
+          lines.map((line) => ({
+            product_id: productId,
+            ingredient_id: line.ingredientId,
+            quantity: parsePositiveQuantity(line.quantity),
+          })),
+        );
+        if (linesError) {
+          setError("บันทึกไม่สำเร็จ");
+          return;
+        }
+      }
+      onSaved();
+    } finally {
+      setSaving(false);
     }
-    const supabase = createBrowserClient();
-    let productId = existing?.id;
-    if (productId) {
-      const { error: updateError } = await supabase
-        .from("products")
-        .update({
-          name: name.trim(),
-          selling_price: parsedPrice.value,
-          updated_at: new Date().toISOString(),
-        })
-        .eq("id", productId);
-      if (updateError) {
-        setError("บันทึกไม่สำเร็จ");
-        return;
-      }
-      const { error: deleteLinesError } = await supabase
-        .from("product_ingredients")
-        .delete()
-        .eq("product_id", productId);
-      if (deleteLinesError) {
-        setError("บันทึกไม่สำเร็จ");
-        return;
-      }
-    } else {
-      const { data, error: insertError } = await supabase
-        .from("products")
-        .insert({
-          name: name.trim(),
-          selling_price: parsedPrice.value,
-        })
-        .select("id")
-        .single();
-      if (insertError || !data) {
-        setError("บันทึกไม่สำเร็จ");
-        return;
-      }
-      productId = data.id as string;
-    }
-    if (lines.length > 0) {
-      const { error: linesError } = await supabase.from("product_ingredients").insert(
-        lines.map((line) => ({
-          product_id: productId,
-          ingredient_id: line.ingredientId,
-          quantity: parsePositiveQuantity(line.quantity),
-        })),
-      );
-      if (linesError) {
-        setError("บันทึกไม่สำเร็จ");
-        return;
-      }
-    }
-    onSaved();
   }
 
   return (
@@ -267,9 +276,9 @@ export function ProductForm({
                   <td>
                     {channel.name} ({channel.fee_percent}%)
                   </td>
-                  <td>{formatBaht(profit.channelFee)}</td>
-                  <td>{formatBaht(profit.netReceived)}</td>
-                  <td>{formatBaht(profit.netProfit)}</td>
+                  <td>{formatBaht(profit.channelFee)} บาท</td>
+                  <td>{formatBaht(profit.netReceived)} บาท</td>
+                  <td>{formatBaht(profit.netProfit)} บาท</td>
                 </tr>
               ) : null,
             )}
@@ -280,7 +289,9 @@ export function ProductForm({
           ตั้งราคาขายและเพิ่มช่องทางขายก่อน จึงจะเห็นกำไรสุทธิ
         </p>
       )}
-      <button type="submit">บันทึกเมนู</button>
+      <button type="submit" disabled={saving}>
+        บันทึกเมนู
+      </button>
       <button type="button" onClick={onCancel}>
         ยกเลิก
       </button>

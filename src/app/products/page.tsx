@@ -124,6 +124,7 @@ export default function ProductsPage() {
       ) : null}
       {showForm ? (
         <ProductForm
+          key={editing?.id ?? "new"}
           ingredients={ingredients}
           channels={channels}
           existing={editing}
