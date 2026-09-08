@@ -19,6 +19,8 @@ npm run dev
 
 ## Deploy บน Netlify
 
+ไฟล์ `netlify.toml` กำหนด build command และ Next.js runtime ให้แล้ว
+
 1. เชื่อม Git repo กับ Netlify
 2. Build command: `npm run build`
 3. ใส่ `NEXT_PUBLIC_SUPABASE_URL` และ `NEXT_PUBLIC_SUPABASE_ANON_KEY` ใน Site environment variables
