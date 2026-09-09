@@ -42,7 +42,8 @@ declare
   v_avg numeric;
   v_row stock_purchases;
 begin
-  if p_quantity <= 0 or p_amount_paid <= 0 or p_list_price <= 0 then
+  if p_quantity is null or p_amount_paid is null or p_list_price is null
+     or p_quantity <= 0 or p_amount_paid <= 0 or p_list_price <= 0 then
     raise exception 'quantity and prices must be positive';
   end if;
   if p_amount_paid > p_list_price then
