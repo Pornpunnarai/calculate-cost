@@ -5,6 +5,8 @@ const links = [
   { href: "/products", label: "เมนู" },
   { href: "/units", label: "หน่วย" },
   { href: "/channels", label: "ช่องทางขาย" },
+  { href: "/purchases", label: "ซื้อเข้า" },
+  { href: "/sales", label: "ขายออก" },
 ];
 
 export function Nav() {
