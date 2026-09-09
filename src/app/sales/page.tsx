@@ -72,6 +72,7 @@ export default function SalesPage() {
   const [quantity, setQuantity] = useState("");
   const [error, setError] = useState("");
   const [rpcShortages, setRpcShortages] = useState<StockNeed[]>([]);
+  const [saving, setSaving] = useState(false);
 
   async function load() {
     setError("");
@@ -239,7 +240,9 @@ export default function SalesPage() {
     Boolean(selectedChannel) &&
     soldQty != null &&
     recipeReady &&
-    shortages.length === 0;
+    shortages.length === 0 &&
+    rpcShortages.length === 0 &&
+    !saving;
   const productsById = Object.fromEntries(
     products.map((item) => [item.id, item]),
   );
@@ -250,17 +253,26 @@ export default function SalesPage() {
   async function onSubmit(event: React.FormEvent) {
     event.preventDefault();
     setError("");
-    setRpcShortages([]);
+    if (
+      !selectedProduct ||
+      !selectedChannel ||
+      soldQty == null ||
+      !recipeReady ||
+      selectedProduct.selling_price == null
+    ) {
+      return;
+    }
+    if (shortages.length > 0) {
+      return;
+    }
+    if (rpcShortages.length > 0) {
+      return;
+    }
+    if (saving) {
+      return;
+    }
+    setSaving(true);
     try {
-      if (
-        !selectedProduct ||
-        !selectedChannel ||
-        soldQty == null ||
-        !recipeReady ||
-        selectedProduct.selling_price == null
-      ) {
-        return;
-      }
       const supabase = createBrowserClient();
       const { data, error: rpcError } = await supabase.rpc(
         "record_stock_sale",
@@ -290,6 +302,8 @@ export default function SalesPage() {
       await load();
     } catch {
       setError("บันทึกไม่สำเร็จ");
+    } finally {
+      setSaving(false);
     }
   }
 
@@ -310,7 +324,10 @@ export default function SalesPage() {
         <select
           id="sale-product"
           value={productId}
-          onChange={(event) => setProductId(event.target.value)}
+          onChange={(event) => {
+            setRpcShortages([]);
+            setProductId(event.target.value);
+          }}
         >
           <option value="">เลือกเมนู</option>
           {products.map((item) => (
@@ -324,13 +341,19 @@ export default function SalesPage() {
           id="sale-qty"
           inputMode="decimal"
           value={quantity}
-          onChange={(event) => setQuantity(event.target.value)}
+          onChange={(event) => {
+            setRpcShortages([]);
+            setQuantity(event.target.value);
+          }}
         />
         <label htmlFor="sale-channel">ช่องทาง</label>
         <select
           id="sale-channel"
           value={channelId}
-          onChange={(event) => setChannelId(event.target.value)}
+          onChange={(event) => {
+            setRpcShortages([]);
+            setChannelId(event.target.value);
+          }}
         >
           <option value="">เลือกช่องทาง</option>
           {channels.map((item) => (
