@@ -1,8 +1,8 @@
 # Purchase syncs ingredient pack — Design Spec
 
 Date: 2026-09-09  
-Status: Approved for user review  
-Version: v1 (amends buy/sell v1)
+Status: Superseded by `2026-09-09-purchase-first-warehouse-design.md`  
+Version: v1 (pack overwrite still applies; warehouse is now purchase-first and view-only)
 
 สเปกนี้แก้กฎใน `2026-09-09-buy-sell-design.md` ที่เคยห้ามทับแพ็กตอนซื้อเข้า
 
