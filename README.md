@@ -4,8 +4,9 @@
 
 1. สร้างโปรเจกต์ใหม่ที่ https://supabase.com
 2. เปิด SQL Editor แล้วรันไฟล์ `supabase/migrations/20260908000000_init.sql`
-3. คัดลอก Project URL และ anon key
-4. สร้าง `.env.local` จาก `.env.example` แล้วใส่ค่าจริง
+3. จากนั้นรันไฟล์ `supabase/migrations/20260909000000_buy_sell.sql` ใน SQL Editor เช่นกัน
+4. คัดลอก Project URL และ anon key
+5. สร้าง `.env.local` จาก `.env.example` แล้วใส่ค่าจริง
 
 ## รันบนเครื่อง
 

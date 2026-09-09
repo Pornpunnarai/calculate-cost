@@ -12,6 +12,7 @@ export type Ingredient = {
   purchase_quantity: number;
   purchase_unit_id: string;
   purchase_price: number;
+  remaining_quantity: number;
   created_at: string;
   updated_at: string;
 };
@@ -39,3 +40,24 @@ export type SalesChannel = {
 };
 
 export type IngredientWithUnit = Ingredient & { unit: Unit };
+
+export type StockPurchase = {
+  id: string;
+  ingredient_id: string;
+  quantity: number;
+  amount_paid: number;
+  remaining_after: number;
+  unit_cost_after: number;
+  created_at: string;
+};
+
+export type StockSale = {
+  id: string;
+  product_id: string;
+  sales_channel_id: string;
+  quantity: number;
+  selling_price_each: number;
+  fee_percent: number;
+  product_cost_each: number;
+  created_at: string;
+};

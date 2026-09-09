@@ -53,6 +53,7 @@ export default function ProductsPage() {
               unit,
               purchase_quantity: asNumber(row.purchase_quantity),
               purchase_price: asNumber(row.purchase_price),
+              remaining_quantity: asNumber(row.remaining_quantity ?? 0),
             } as IngredientRow,
           ];
         }),
