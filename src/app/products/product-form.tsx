@@ -4,6 +4,7 @@ import { useMemo, useRef, useState } from "react";
 import { ErrorBanner } from "@/components/error-banner";
 import { channelProfit, lineCost, productCost } from "@/lib/costing";
 import { formatBaht } from "@/lib/money";
+import { effectiveCostInput, type PurchaseRound } from "@/lib/purchase-cost";
 import { asNumber, createBrowserClient } from "@/lib/supabase/client";
 import type { Ingredient, Product, ProductIngredient, SalesChannel, Unit } from "@/lib/types";
 import { parseOptionalSellingPrice, parsePositiveQuantity } from "@/lib/validation";
@@ -17,6 +18,7 @@ type RecipeLine = {
 
 export function ProductForm({
   ingredients,
+  purchasesByIngredient,
   channels,
   existing,
   existingLines,
@@ -24,6 +26,7 @@ export function ProductForm({
   onCancel,
 }: {
   ingredients: IngredientRow[];
+  purchasesByIngredient: Record<string, PurchaseRound[]>;
   channels: SalesChannel[];
   existing: Product | null;
   existingLines: ProductIngredient[];
@@ -55,10 +58,13 @@ export function ProductForm({
       }
       return [
         {
-          ingredient: {
-            purchasePrice: ingredient.purchase_price,
-            purchaseQuantity: ingredient.purchase_quantity,
-          },
+          ingredient: effectiveCostInput(
+            {
+              purchasePrice: ingredient.purchase_price,
+              purchaseQuantity: ingredient.purchase_quantity,
+            },
+            purchasesByIngredient[ingredient.id] ?? [],
+          ),
           quantity,
           ingredientId: ingredient.id,
           ingredientRow: ingredient,
@@ -75,7 +81,7 @@ export function ProductForm({
         cost: lineCost(line.ingredient, line.quantity),
       })),
     };
-  }, [ingredients, lines]);
+  }, [ingredients, lines, purchasesByIngredient]);
 
   const selling = parseOptionalSellingPrice(sellingPriceRaw);
   const profits =

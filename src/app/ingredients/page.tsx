@@ -4,8 +4,9 @@ import { useEffect, useState } from "react";
 import { ErrorBanner } from "@/components/error-banner";
 import { unitCost } from "@/lib/costing";
 import { formatBaht } from "@/lib/money";
+import { effectiveCostInput, type PurchaseRound } from "@/lib/purchase-cost";
 import { asNumber, asOne, createBrowserClient } from "@/lib/supabase/client";
-import type { Ingredient, Unit } from "@/lib/types";
+import type { Ingredient, StockPurchase, Unit } from "@/lib/types";
 import {
   canChangeIngredientUnit,
   canDeleteIngredient,
@@ -14,9 +15,27 @@ import {
 
 type IngredientRow = Ingredient & { unit: Unit };
 
+function groupPurchasesByIngredient(
+  rows: StockPurchase[],
+): Record<string, PurchaseRound[]> {
+  const grouped: Record<string, PurchaseRound[]> = {};
+  for (const row of rows) {
+    const rounds = grouped[row.ingredient_id] ?? [];
+    rounds.push({
+      amountPaid: asNumber(row.amount_paid),
+      quantity: asNumber(row.quantity),
+    });
+    grouped[row.ingredient_id] = rounds;
+  }
+  return grouped;
+}
+
 export default function IngredientsPage() {
   const [units, setUnits] = useState<Unit[]>([]);
   const [items, setItems] = useState<IngredientRow[]>([]);
+  const [purchasesByIngredient, setPurchasesByIngredient] = useState<
+    Record<string, PurchaseRound[]>
+  >({});
   const [name, setName] = useState("");
   const [quantity, setQuantity] = useState("");
   const [unitId, setUnitId] = useState("");
@@ -29,18 +48,26 @@ export default function IngredientsPage() {
     setError("");
     try {
       const supabase = createBrowserClient();
-      const [unitsRes, ingredientsRes, usedRes] = await Promise.all([
+      const [unitsRes, ingredientsRes, usedRes, purchasesRes] = await Promise.all([
         supabase.from("units").select("*").order("created_at"),
         supabase
           .from("ingredients")
           .select("*, unit:units(*)")
           .order("created_at"),
         supabase.from("product_ingredients").select("ingredient_id"),
+        supabase.from("stock_purchases").select("*"),
       ]);
       if (unitsRes.error || ingredientsRes.error || usedRes.error) {
         setError("โหลดวัตถุดิบไม่สำเร็จ");
         return;
       }
+      setPurchasesByIngredient(
+        groupPurchasesByIngredient(
+          purchasesRes.error
+            ? []
+            : ((purchasesRes.data ?? []) as StockPurchase[]),
+        ),
+      );
       const unitList = (unitsRes.data ?? []) as Unit[];
       setUnits(unitList);
       if (!unitId && unitList[0]) {
@@ -237,6 +264,7 @@ export default function IngredientsPage() {
           <tr>
             <th>ชื่อ</th>
             <th>แพ็กที่ซื้อ</th>
+            <th>คงเหลือ</th>
             <th>ต้นทุนต่อหน่วย</th>
             <th></th>
           </tr>
@@ -249,11 +277,19 @@ export default function IngredientsPage() {
                 {item.purchase_quantity} {item.unit.symbol} / {formatBaht(item.purchase_price)} บาท
               </td>
               <td>
+                {item.remaining_quantity} {item.unit.symbol}
+              </td>
+              <td>
                 {formatBaht(
-                  unitCost({
-                    purchasePrice: item.purchase_price,
-                    purchaseQuantity: item.purchase_quantity,
-                  }),
+                  unitCost(
+                    effectiveCostInput(
+                      {
+                        purchasePrice: item.purchase_price,
+                        purchaseQuantity: item.purchase_quantity,
+                      },
+                      purchasesByIngredient[item.id] ?? [],
+                    ),
+                  ),
                 )}{" "}
                 บาท/{item.unit.symbol}
               </td>

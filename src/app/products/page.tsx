@@ -6,20 +6,40 @@ import { ErrorBanner } from "@/components/error-banner";
 import { ProductForm } from "@/app/products/product-form";
 import { productCost } from "@/lib/costing";
 import { formatBaht } from "@/lib/money";
+import { effectiveCostInput, type PurchaseRound } from "@/lib/purchase-cost";
 import { asNumber, asOne, createBrowserClient } from "@/lib/supabase/client";
 import type {
   Ingredient,
   Product,
   ProductIngredient,
   SalesChannel,
+  StockPurchase,
   Unit,
 } from "@/lib/types";
 import { canCreateProduct } from "@/lib/validation";
 
 type IngredientRow = Ingredient & { unit: Unit };
 
+function groupPurchasesByIngredient(
+  rows: StockPurchase[],
+): Record<string, PurchaseRound[]> {
+  const grouped: Record<string, PurchaseRound[]> = {};
+  for (const row of rows) {
+    const rounds = grouped[row.ingredient_id] ?? [];
+    rounds.push({
+      amountPaid: asNumber(row.amount_paid),
+      quantity: asNumber(row.quantity),
+    });
+    grouped[row.ingredient_id] = rounds;
+  }
+  return grouped;
+}
+
 export default function ProductsPage() {
   const [ingredients, setIngredients] = useState<IngredientRow[]>([]);
+  const [purchasesByIngredient, setPurchasesByIngredient] = useState<
+    Record<string, PurchaseRound[]>
+  >({});
   const [products, setProducts] = useState<Product[]>([]);
   const [lines, setLines] = useState<ProductIngredient[]>([]);
   const [channels, setChannels] = useState<SalesChannel[]>([]);
@@ -31,16 +51,24 @@ export default function ProductsPage() {
     setError("");
     try {
       const supabase = createBrowserClient();
-      const [ingRes, prodRes, lineRes, chRes] = await Promise.all([
+      const [ingRes, prodRes, lineRes, chRes, purchasesRes] = await Promise.all([
         supabase.from("ingredients").select("*, unit:units(*)").order("created_at"),
         supabase.from("products").select("*").order("created_at"),
         supabase.from("product_ingredients").select("*"),
         supabase.from("sales_channels").select("*").order("created_at"),
+        supabase.from("stock_purchases").select("*"),
       ]);
       if (ingRes.error || prodRes.error || lineRes.error || chRes.error) {
         setError("โหลดเมนูไม่สำเร็จ");
         return;
       }
+      setPurchasesByIngredient(
+        groupPurchasesByIngredient(
+          purchasesRes.error
+            ? []
+            : ((purchasesRes.data ?? []) as StockPurchase[]),
+        ),
+      );
       setIngredients(
         (ingRes.data ?? []).flatMap((row) => {
           const unit = asOne<Unit>(row.unit as Unit | Unit[] | null);
@@ -96,10 +124,13 @@ export default function ProductsPage() {
         }
         return [
           {
-            ingredient: {
-              purchasePrice: ingredient.purchase_price,
-              purchaseQuantity: ingredient.purchase_quantity,
-            },
+            ingredient: effectiveCostInput(
+              {
+                purchasePrice: ingredient.purchase_price,
+                purchaseQuantity: ingredient.purchase_quantity,
+              },
+              purchasesByIngredient[ingredient.id] ?? [],
+            ),
             quantity: line.quantity,
           },
         ];
@@ -144,6 +175,7 @@ export default function ProductsPage() {
         <ProductForm
           key={editing?.id ?? "new"}
           ingredients={ingredients}
+          purchasesByIngredient={purchasesByIngredient}
           channels={channels}
           existing={editing}
           existingLines={
