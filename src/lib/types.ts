@@ -39,6 +39,13 @@ export type SalesChannel = {
   created_at: string;
 };
 
+export type PurchaseSource = {
+  id: string;
+  name: string;
+  is_builtin: boolean;
+  created_at: string;
+};
+
 export type IngredientWithUnit = Ingredient & { unit: Unit };
 
 export type StockPurchase = {
@@ -48,6 +55,9 @@ export type StockPurchase = {
   amount_paid: number;
   remaining_after: number;
   unit_cost_after: number;
+  purchased_at: string | null;
+  list_price: number | null;
+  purchase_source_id: string | null;
   created_at: string;
 };
 
