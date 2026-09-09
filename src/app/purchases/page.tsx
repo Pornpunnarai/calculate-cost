@@ -2,57 +2,80 @@
 
 import { useEffect, useState } from "react";
 import { ErrorBanner } from "@/components/error-banner";
-import { unitCost } from "@/lib/costing";
 import { formatBaht } from "@/lib/money";
-import { effectiveCostInput, type PurchaseRound } from "@/lib/purchase-cost";
+import {
+  displayedListPrice,
+  displayedPurchaseDate,
+  isValidPurchaseMoney,
+  purchaseDiscount,
+} from "@/lib/purchase-money";
 import { asNumber, asOne, createBrowserClient } from "@/lib/supabase/client";
-import type { Ingredient, StockPurchase, Unit } from "@/lib/types";
+import type {
+  Ingredient,
+  PurchaseSource,
+  StockPurchase,
+  Unit,
+} from "@/lib/types";
 import { isPositiveNumber } from "@/lib/validation";
 
 type IngredientRow = Ingredient & { unit: Unit };
+type PurchaseRow = StockPurchase & { source: PurchaseSource | null };
 
-function groupPurchasesByIngredient(
-  rows: StockPurchase[],
-): Record<string, PurchaseRound[]> {
-  const grouped: Record<string, PurchaseRound[]> = {};
-  for (const row of rows) {
-    const rounds = grouped[row.ingredient_id] ?? [];
-    rounds.push({
-      amountPaid: asNumber(row.amount_paid),
-      quantity: asNumber(row.quantity),
-    });
-    grouped[row.ingredient_id] = rounds;
-  }
-  return grouped;
+function todayIsoDate(): string {
+  const now = new Date();
+  const month = String(now.getMonth() + 1).padStart(2, "0");
+  const day = String(now.getDate()).padStart(2, "0");
+  return `${now.getFullYear()}-${month}-${day}`;
 }
 
 export default function PurchasesPage() {
+  const [mode, setMode] = useState<"new" | "existing">("new");
   const [items, setItems] = useState<IngredientRow[]>([]);
-  const [purchases, setPurchases] = useState<StockPurchase[]>([]);
-  const [purchasesByIngredient, setPurchasesByIngredient] = useState<
-    Record<string, PurchaseRound[]>
-  >({});
+  const [units, setUnits] = useState<Unit[]>([]);
+  const [sources, setSources] = useState<PurchaseSource[]>([]);
+  const [purchases, setPurchases] = useState<PurchaseRow[]>([]);
   const [ingredientId, setIngredientId] = useState("");
+  const [name, setName] = useState("");
+  const [unitId, setUnitId] = useState("");
   const [quantity, setQuantity] = useState("");
+  const [purchasedAt, setPurchasedAt] = useState(todayIsoDate);
+  const [listPrice, setListPrice] = useState("");
   const [amountPaid, setAmountPaid] = useState("");
+  const [sourceId, setSourceId] = useState("");
+  const [sourceName, setSourceName] = useState("");
   const [error, setError] = useState("");
   const [saving, setSaving] = useState(false);
+
+  const listPriceNumber = Number(listPrice);
+  const paidNumber = Number(amountPaid);
+  const discountPreview =
+    isValidPurchaseMoney(listPriceNumber, paidNumber)
+      ? purchaseDiscount(listPriceNumber, paidNumber)
+      : null;
 
   async function load() {
     setError("");
     try {
       const supabase = createBrowserClient();
-      const [ingredientsRes, purchasesRes] = await Promise.all([
-        supabase
-          .from("ingredients")
-          .select("*, unit:units(*)")
-          .order("created_at"),
-        supabase
-          .from("stock_purchases")
-          .select("*")
-          .order("created_at", { ascending: false }),
-      ]);
-      if (ingredientsRes.error || purchasesRes.error) {
+      const [ingredientsRes, purchasesRes, unitsRes, sourcesRes] =
+        await Promise.all([
+          supabase
+            .from("ingredients")
+            .select("*, unit:units(*)")
+            .order("created_at"),
+          supabase
+            .from("stock_purchases")
+            .select("*, source:purchase_sources(*)")
+            .order("created_at", { ascending: false }),
+          supabase.from("units").select("*").order("created_at"),
+          supabase.from("purchase_sources").select("*").order("created_at"),
+        ]);
+      if (
+        ingredientsRes.error ||
+        purchasesRes.error ||
+        unitsRes.error ||
+        sourcesRes.error
+      ) {
         setError("โหลดประวัติซื้อไม่สำเร็จ");
         return;
       }
@@ -75,17 +98,34 @@ export default function PurchasesPage() {
       if (!ingredientId && ingredientRows[0]) {
         setIngredientId(ingredientRows[0].id);
       }
-      const purchaseRows = ((purchasesRes.data ?? []) as StockPurchase[]).map(
-        (row) => ({
+      const unitList = (unitsRes.data ?? []) as Unit[];
+      setUnits(unitList);
+      if (!unitId && unitList[0]) {
+        setUnitId(unitList[0].id);
+      }
+      const sourceList = (sourcesRes.data ?? []) as PurchaseSource[];
+      setSources(sourceList);
+      if (!sourceId && sourceList[0]) {
+        setSourceId(sourceList[0].id);
+      }
+      setPurchases(
+        ((purchasesRes.data ?? []) as Array<
+          StockPurchase & {
+            source: PurchaseSource | PurchaseSource[] | null;
+          }
+        >).map((row) => ({
           ...row,
           quantity: asNumber(row.quantity),
           amount_paid: asNumber(row.amount_paid),
           remaining_after: asNumber(row.remaining_after),
           unit_cost_after: asNumber(row.unit_cost_after),
-        }),
+          list_price:
+            row.list_price == null ? null : asNumber(row.list_price),
+          purchased_at: row.purchased_at ?? null,
+          purchase_source_id: row.purchase_source_id ?? null,
+          source: asOne<PurchaseSource>(row.source),
+        })),
       );
-      setPurchases(purchaseRows);
-      setPurchasesByIngredient(groupPurchasesByIngredient(purchaseRows));
     } catch {
       setError("โหลดประวัติซื้อไม่สำเร็จ");
     }
@@ -96,36 +136,87 @@ export default function PurchasesPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  async function resolveSourceId(): Promise<string | null> {
+    const supabase = createBrowserClient();
+    const typed = sourceName.trim();
+    if (typed) {
+      const existing = sources.find((source) => source.name === typed);
+      if (existing) {
+        return existing.id;
+      }
+      const { data, error: insertError } = await supabase
+        .from("purchase_sources")
+        .insert({ name: typed })
+        .select("id")
+        .single();
+      if (!insertError && data) {
+        return data.id as string;
+      }
+      const { data: again } = await supabase
+        .from("purchase_sources")
+        .select("id")
+        .eq("name", typed)
+        .maybeSingle();
+      return again?.id ?? null;
+    }
+    return sourceId || null;
+  }
+
   async function onSubmit(event: React.FormEvent) {
     event.preventDefault();
     if (saving) {
       return;
     }
     setError("");
+    const qty = Number(quantity);
+    if (
+      !isPositiveNumber(qty) ||
+      !isValidPurchaseMoney(listPriceNumber, paidNumber)
+    ) {
+      setError(
+        "กรอกปริมาณ ราคาเต็ม และเงินที่จ่ายให้มากกว่า 0 และเงินที่จ่ายต้องไม่เกินราคาเต็ม",
+      );
+      return;
+    }
+    if (!purchasedAt) {
+      setError("กรอกวันที่ซื้อและแหล่งซื้อ");
+      return;
+    }
+    if (mode === "new" && (!name.trim() || !unitId)) {
+      setError("กรอกชื่อและหน่วย");
+      return;
+    }
+    if (mode === "existing" && !ingredientId) {
+      setError("เลือกวัตถุดิบในคลัง");
+      return;
+    }
+    setSaving(true);
     try {
-      const purchaseQuantity = Number(quantity);
-      const paid = Number(amountPaid);
-      if (
-        !ingredientId ||
-        !isPositiveNumber(purchaseQuantity) ||
-        !isPositiveNumber(paid)
-      ) {
-        setError("กรอกปริมาณและเงินที่จ่ายให้มากกว่า 0");
+      const resolvedSourceId = await resolveSourceId();
+      if (!resolvedSourceId) {
+        setError("กรอกวันที่ซื้อและแหล่งซื้อ");
         return;
       }
-      setSaving(true);
       const supabase = createBrowserClient();
       const { error: rpcError } = await supabase.rpc("record_stock_purchase", {
-        p_ingredient_id: ingredientId,
-        p_quantity: purchaseQuantity,
-        p_amount_paid: paid,
+        p_ingredient_id: mode === "existing" ? ingredientId : null,
+        p_name: mode === "new" ? name.trim() : "",
+        p_unit_id: mode === "new" ? unitId : null,
+        p_quantity: qty,
+        p_amount_paid: paidNumber,
+        p_list_price: listPriceNumber,
+        p_purchased_at: purchasedAt,
+        p_source_id: resolvedSourceId,
       });
       if (rpcError) {
         setError("บันทึกไม่สำเร็จ");
         return;
       }
+      setName("");
       setQuantity("");
+      setListPrice("");
       setAmountPaid("");
+      setSourceName("");
       await load();
     } catch {
       setError("บันทึกไม่สำเร็จ");
@@ -134,7 +225,6 @@ export default function PurchasesPage() {
     }
   }
 
-  const selected = items.find((item) => item.id === ingredientId);
   const itemsById = Object.fromEntries(items.map((item) => [item.id, item]));
 
   return (
@@ -142,41 +232,84 @@ export default function PurchasesPage() {
       <h1>ซื้อเข้า</h1>
       {error ? <ErrorBanner message={error} /> : null}
       <form onSubmit={onSubmit}>
-        <label htmlFor="purchase-ingredient">วัตถุดิบ</label>
-        <select
-          id="purchase-ingredient"
-          value={ingredientId}
-          onChange={(event) => setIngredientId(event.target.value)}
-        >
-          {items.map((item) => (
-            <option key={item.id} value={item.id}>
-              {item.name}
-            </option>
-          ))}
-        </select>
-        {selected ? (
-          <p className="muted">
-            คงเหลือ {selected.remaining_quantity} {selected.unit.symbol} · ต้นทุน{" "}
-            {formatBaht(
-              unitCost(
-                effectiveCostInput(
-                  {
-                    purchasePrice: selected.purchase_price,
-                    purchaseQuantity: selected.purchase_quantity,
-                  },
-                  purchasesByIngredient[selected.id] ?? [],
-                ),
-              ),
-            )}{" "}
-            บาท/{selected.unit.symbol}
-          </p>
-        ) : null}
+        <fieldset>
+          <legend>ประเภท</legend>
+          <label>
+            <input
+              type="radio"
+              name="purchase-mode"
+              checked={mode === "new"}
+              onChange={() => setMode("new")}
+            />
+            ของใหม่
+          </label>
+          <label>
+            <input
+              type="radio"
+              name="purchase-mode"
+              checked={mode === "existing"}
+              onChange={() => setMode("existing")}
+            />
+            ของในคลัง
+          </label>
+        </fieldset>
+        {mode === "new" ? (
+          <>
+            <label htmlFor="purchase-name">ชื่อ</label>
+            <input
+              id="purchase-name"
+              value={name}
+              onChange={(event) => setName(event.target.value)}
+            />
+            <label htmlFor="purchase-unit">หน่วย</label>
+            <select
+              id="purchase-unit"
+              value={unitId}
+              onChange={(event) => setUnitId(event.target.value)}
+            >
+              {units.map((unit) => (
+                <option key={unit.id} value={unit.id}>
+                  {unit.name} ({unit.symbol})
+                </option>
+              ))}
+            </select>
+          </>
+        ) : (
+          <>
+            <label htmlFor="purchase-ingredient">วัตถุดิบ</label>
+            <select
+              id="purchase-ingredient"
+              value={ingredientId}
+              onChange={(event) => setIngredientId(event.target.value)}
+            >
+              {items.map((item) => (
+                <option key={item.id} value={item.id}>
+                  {item.name}
+                </option>
+              ))}
+            </select>
+          </>
+        )}
         <label htmlFor="purchase-qty">ปริมาณที่ซื้อ</label>
         <input
           id="purchase-qty"
           inputMode="decimal"
           value={quantity}
           onChange={(event) => setQuantity(event.target.value)}
+        />
+        <label htmlFor="purchase-date">วันที่ซื้อ</label>
+        <input
+          id="purchase-date"
+          type="date"
+          value={purchasedAt}
+          onChange={(event) => setPurchasedAt(event.target.value)}
+        />
+        <label htmlFor="purchase-list">ราคาเต็ม (บาท)</label>
+        <input
+          id="purchase-list"
+          inputMode="decimal"
+          value={listPrice}
+          onChange={(event) => setListPrice(event.target.value)}
         />
         <label htmlFor="purchase-paid">เงินที่จ่าย (บาท)</label>
         <input
@@ -185,6 +318,28 @@ export default function PurchasesPage() {
           value={amountPaid}
           onChange={(event) => setAmountPaid(event.target.value)}
         />
+        <p className="muted">
+          ส่วนลด{" "}
+          {discountPreview == null ? "—" : `${formatBaht(discountPreview)} บาท`}
+        </p>
+        <label htmlFor="purchase-source">แหล่งซื้อ</label>
+        <select
+          id="purchase-source"
+          value={sourceId}
+          onChange={(event) => setSourceId(event.target.value)}
+        >
+          {sources.map((source) => (
+            <option key={source.id} value={source.id}>
+              {source.name}
+            </option>
+          ))}
+        </select>
+        <label htmlFor="purchase-source-new">หรือพิมพ์ร้านใหม่</label>
+        <input
+          id="purchase-source-new"
+          value={sourceName}
+          onChange={(event) => setSourceName(event.target.value)}
+        />
         <button type="submit" disabled={saving}>
           บันทึกการซื้อ
         </button>
@@ -192,10 +347,13 @@ export default function PurchasesPage() {
       <table>
         <thead>
           <tr>
-            <th>วันเวลา</th>
+            <th>วันที่ซื้อ</th>
             <th>วัตถุดิบ</th>
+            <th>แหล่งซื้อ</th>
             <th>ปริมาณ</th>
+            <th>ราคาเต็ม</th>
             <th>เงินที่จ่าย</th>
+            <th>ส่วนลด</th>
             <th>คงเหลือหลังซื้อ</th>
             <th>ต้นทุนเฉลี่ยหลังซื้อ</th>
           </tr>
@@ -204,14 +362,25 @@ export default function PurchasesPage() {
           {purchases.map((row) => {
             const ingredient = itemsById[row.ingredient_id];
             const symbol = ingredient?.unit.symbol ?? "";
+            const shownList = displayedListPrice(
+              row.list_price,
+              row.amount_paid,
+            );
             return (
               <tr key={row.id}>
-                <td>{new Date(row.created_at).toLocaleString("th-TH")}</td>
+                <td>
+                  {displayedPurchaseDate(row.purchased_at, row.created_at)}
+                </td>
                 <td>{ingredient?.name ?? "—"}</td>
+                <td>{row.source?.name ?? "—"}</td>
                 <td>
                   {row.quantity} {symbol}
                 </td>
+                <td>{formatBaht(shownList)} บาท</td>
                 <td>{formatBaht(row.amount_paid)} บาท</td>
+                <td>
+                  {formatBaht(purchaseDiscount(shownList, row.amount_paid))} บาท
+                </td>
                 <td>
                   {row.remaining_after} {symbol}
                 </td>
