@@ -113,6 +113,8 @@ begin
     join ingredients i on i.id = pi.ingredient_id
     join units u on u.id = i.purchase_unit_id
     where pi.product_id = p_product_id
+    order by pi.ingredient_id
+    for update of i
   loop
     v_need := v_line.recipe_qty * p_quantity;
     v_have := v_line.remaining_quantity;

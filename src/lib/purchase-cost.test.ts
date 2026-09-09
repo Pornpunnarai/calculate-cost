@@ -31,6 +31,15 @@ describe("averagePurchaseUnitCost", () => {
     expect(avg).not.toBeNull();
     expect(formatBaht(avg!)).toBe("4.83");
   });
+
+  it("averages two rounds equally to 4.25", () => {
+    const avg = averagePurchaseUnitCost([
+      { amountPaid: 400, quantity: 100 },
+      { amountPaid: 450, quantity: 100 },
+    ]);
+    expect(avg).not.toBeNull();
+    expect(formatBaht(avg!)).toBe("4.25");
+  });
 });
 
 describe("effectiveCostInput", () => {

@@ -60,6 +60,13 @@ describe("channelProfit", () => {
     expect(formatBaht(result!.netProfit)).toBe("45.40");
   });
 
+  it("sell 2 × 80 GP 12% cost 25 => received 140.80 profit 90.80", () => {
+    const result = channelProfit(80 * 2, 25 * 2, 12);
+    expect(result).not.toBeNull();
+    expect(formatBaht(result!.netReceived)).toBe("140.80");
+    expect(formatBaht(result!.netProfit)).toBe("90.80");
+  });
+
   it("GP 0% received equals selling price", () => {
     const result = channelProfit(80, 25, 0);
     expect(result).not.toBeNull();

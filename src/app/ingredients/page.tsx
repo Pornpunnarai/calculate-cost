@@ -43,9 +43,11 @@ export default function IngredientsPage() {
   const [editingId, setEditingId] = useState<string | null>(null);
   const [usedIds, setUsedIds] = useState<Set<string>>(new Set());
   const [error, setError] = useState("");
+  const [purchaseWarning, setPurchaseWarning] = useState("");
 
   async function load() {
     setError("");
+    setPurchaseWarning("");
     try {
       const supabase = createBrowserClient();
       const [unitsRes, ingredientsRes, usedRes, purchasesRes] = await Promise.all([
@@ -60,6 +62,9 @@ export default function IngredientsPage() {
       if (unitsRes.error || ingredientsRes.error || usedRes.error) {
         setError("โหลดวัตถุดิบไม่สำเร็จ");
         return;
+      }
+      if (purchasesRes.error) {
+        setPurchaseWarning("โหลดประวัติซื้อไม่ได้ ต้นทุนที่แสดงใช้แพ็กตั้งต้น");
       }
       setPurchasesByIngredient(
         groupPurchasesByIngredient(
@@ -191,7 +196,11 @@ export default function IngredientsPage() {
         .delete()
         .eq("id", item.id);
       if (deleteError) {
-        setError("ลบไม่สำเร็จ");
+        setError(
+          deleteError.code === "23503"
+            ? "ลบไม่ได้ เพราะมีประวัติการซื้อวัตถุดิบนี้อยู่"
+            : "ลบไม่สำเร็จ",
+        );
         return;
       }
       if (editingId === item.id) {
@@ -218,6 +227,7 @@ export default function IngredientsPage() {
       <h1>วัตถุดิบ</h1>
       <p className="muted">เพิ่มของที่ซื้อมาให้ครบก่อน แล้วค่อยไปสร้างเมนู</p>
       {error ? <ErrorBanner message={error} /> : null}
+      {purchaseWarning ? <ErrorBanner message={purchaseWarning} /> : null}
       <form onSubmit={onSubmit}>
         <label htmlFor="ing-name">ชื่อ</label>
         <input

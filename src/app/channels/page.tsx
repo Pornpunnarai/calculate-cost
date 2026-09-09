@@ -74,7 +74,11 @@ export default function ChannelsPage() {
         .delete()
         .eq("id", id);
       if (deleteError) {
-        setError("ลบไม่สำเร็จ");
+        setError(
+          deleteError.code === "23503"
+            ? "ลบไม่ได้ เพราะมีประวัติการขายผ่านช่องทางนี้อยู่"
+            : "ลบไม่สำเร็จ",
+        );
         return;
       }
       await load();

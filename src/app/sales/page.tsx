@@ -274,15 +274,114 @@ export default function SalesPage() {
     setSaving(true);
     try {
       const supabase = createBrowserClient();
+      const [
+        productRes,
+        channelRes,
+        linesRes,
+        ingredientsRes,
+        purchasesRes,
+      ] = await Promise.all([
+        supabase.from("products").select("*").eq("id", selectedProduct.id).single(),
+        supabase
+          .from("sales_channels")
+          .select("*")
+          .eq("id", selectedChannel.id)
+          .single(),
+        supabase
+          .from("product_ingredients")
+          .select("*")
+          .eq("product_id", selectedProduct.id),
+        supabase.from("ingredients").select("*, unit:units(*)"),
+        supabase.from("stock_purchases").select("*"),
+      ]);
+      if (
+        productRes.error ||
+        channelRes.error ||
+        linesRes.error ||
+        ingredientsRes.error ||
+        purchasesRes.error ||
+        !productRes.data ||
+        !channelRes.data
+      ) {
+        setError("บันทึกไม่สำเร็จ");
+        return;
+      }
+
+      const freshProduct = {
+        ...productRes.data,
+        selling_price:
+          productRes.data.selling_price == null
+            ? null
+            : asNumber(productRes.data.selling_price),
+      } as Product;
+      const freshRecipe = (linesRes.data ?? []).map((row) => ({
+        ...row,
+        quantity: asNumber(row.quantity),
+      })) as ProductIngredient[];
+      if (freshProduct.selling_price == null || freshRecipe.length === 0) {
+        setError("เมนูนี้ยังไม่มีสูตรหรือยังไม่ตั้งราคาขาย");
+        return;
+      }
+      const freshChannel = {
+        ...channelRes.data,
+        fee_percent: asNumber(channelRes.data.fee_percent),
+      } as SalesChannel;
+      const freshIngredients = (ingredientsRes.data ?? []).flatMap((row) => {
+        const unit = asOne<Unit>(row.unit as Unit | Unit[] | null);
+        if (!unit) {
+          return [];
+        }
+        return [
+          {
+            ...row,
+            unit,
+            purchase_quantity: asNumber(row.purchase_quantity),
+            purchase_price: asNumber(row.purchase_price),
+            remaining_quantity: asNumber(row.remaining_quantity ?? 0),
+          } as IngredientRow,
+        ];
+      });
+      const freshPurchases = groupPurchasesByIngredient(
+        ((purchasesRes.data ?? []) as StockPurchase[]).map((row) => ({
+          ...row,
+          quantity: asNumber(row.quantity),
+          amount_paid: asNumber(row.amount_paid),
+        })),
+      );
+      const freshCostLines = freshRecipe.flatMap((line) => {
+        const ingredient = freshIngredients.find(
+          (item) => item.id === line.ingredient_id,
+        );
+        if (!ingredient) {
+          return [];
+        }
+        return [
+          {
+            ingredient: effectiveCostInput(
+              {
+                purchasePrice: ingredient.purchase_price,
+                purchaseQuantity: ingredient.purchase_quantity,
+              },
+              freshPurchases[ingredient.id] ?? [],
+            ),
+            quantity: line.quantity,
+          },
+        ];
+      });
+      if (freshCostLines.length !== freshRecipe.length) {
+        setError("บันทึกไม่สำเร็จ");
+        return;
+      }
+      const freshProductCostEach = productCost(freshCostLines);
       const { data, error: rpcError } = await supabase.rpc(
         "record_stock_sale",
         {
-          p_product_id: selectedProduct.id,
-          p_sales_channel_id: selectedChannel.id,
+          p_product_id: freshProduct.id,
+          p_sales_channel_id: freshChannel.id,
           p_quantity: soldQty,
-          p_selling_price_each: selectedProduct.selling_price,
-          p_fee_percent: selectedChannel.fee_percent,
-          p_product_cost_each: productCostEach,
+          p_selling_price_each: freshProduct.selling_price,
+          p_fee_percent: freshChannel.fee_percent,
+          p_product_cost_each: freshProductCostEach,
         },
       );
       if (rpcError) {

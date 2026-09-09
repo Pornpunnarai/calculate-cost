@@ -46,9 +46,11 @@ export default function ProductsPage() {
   const [editing, setEditing] = useState<Product | null>(null);
   const [creating, setCreating] = useState(false);
   const [error, setError] = useState("");
+  const [purchaseWarning, setPurchaseWarning] = useState("");
 
   async function load() {
     setError("");
+    setPurchaseWarning("");
     try {
       const supabase = createBrowserClient();
       const [ingRes, prodRes, lineRes, chRes, purchasesRes] = await Promise.all([
@@ -61,6 +63,9 @@ export default function ProductsPage() {
       if (ingRes.error || prodRes.error || lineRes.error || chRes.error) {
         setError("โหลดเมนูไม่สำเร็จ");
         return;
+      }
+      if (purchasesRes.error) {
+        setPurchaseWarning("โหลดประวัติซื้อไม่ได้ ต้นทุนที่แสดงใช้แพ็กตั้งต้น");
       }
       setPurchasesByIngredient(
         groupPurchasesByIngredient(
@@ -144,7 +149,11 @@ export default function ProductsPage() {
       const supabase = createBrowserClient();
       const { error: deleteError } = await supabase.from("products").delete().eq("id", id);
       if (deleteError) {
-        setError("ลบไม่สำเร็จ");
+        setError(
+          deleteError.code === "23503"
+            ? "ลบไม่ได้ เพราะมีประวัติการขายเมนูนี้อยู่"
+            : "ลบไม่สำเร็จ",
+        );
         return;
       }
       await load();
@@ -160,6 +169,7 @@ export default function ProductsPage() {
     <section>
       <h1>เมนู</h1>
       {error ? <ErrorBanner message={error} /> : null}
+      {purchaseWarning ? <ErrorBanner message={purchaseWarning} /> : null}
       {!allowCreate ? (
         <p>
           ยังไม่มีวัตถุดิบ กรุณา

@@ -36,6 +36,7 @@ export default function PurchasesPage() {
   const [quantity, setQuantity] = useState("");
   const [amountPaid, setAmountPaid] = useState("");
   const [error, setError] = useState("");
+  const [saving, setSaving] = useState(false);
 
   async function load() {
     setError("");
@@ -97,6 +98,9 @@ export default function PurchasesPage() {
 
   async function onSubmit(event: React.FormEvent) {
     event.preventDefault();
+    if (saving) {
+      return;
+    }
     setError("");
     try {
       const purchaseQuantity = Number(quantity);
@@ -109,6 +113,7 @@ export default function PurchasesPage() {
         setError("กรอกปริมาณและเงินที่จ่ายให้มากกว่า 0");
         return;
       }
+      setSaving(true);
       const supabase = createBrowserClient();
       const { error: rpcError } = await supabase.rpc("record_stock_purchase", {
         p_ingredient_id: ingredientId,
@@ -124,6 +129,8 @@ export default function PurchasesPage() {
       await load();
     } catch {
       setError("บันทึกไม่สำเร็จ");
+    } finally {
+      setSaving(false);
     }
   }
 
@@ -178,7 +185,9 @@ export default function PurchasesPage() {
           value={amountPaid}
           onChange={(event) => setAmountPaid(event.target.value)}
         />
-        <button type="submit">บันทึกการซื้อ</button>
+        <button type="submit" disabled={saving}>
+          บันทึกการซื้อ
+        </button>
       </form>
       <table>
         <thead>
