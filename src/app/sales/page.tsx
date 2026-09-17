@@ -2,7 +2,14 @@
 
 import { useEffect, useState } from "react";
 import { ErrorBanner } from "@/components/error-banner";
-import { channelProfit, productCost } from "@/lib/costing";
+import { channelProfit, unitCost } from "@/lib/costing";
+import {
+  deliveryCost,
+  dineInCost,
+  saleNeeds,
+  type FulfillmentKind,
+  type FulfillmentLine,
+} from "@/lib/menu-fulfillment";
 import { formatBaht } from "@/lib/money";
 import { effectiveCostInput, type PurchaseRound } from "@/lib/purchase-cost";
 import { formatShortage, stockShortages, type StockNeed } from "@/lib/stock";
@@ -48,6 +55,36 @@ function groupPurchasesByIngredient(
   return grouped;
 }
 
+function coerceProduct(row: {
+  selling_price?: number | string | null;
+  is_delivery_package?: boolean | null;
+  delivery_package_id?: string | null;
+  selling_price_delivery?: number | string | null;
+}): Product {
+  return {
+    ...(row as Product),
+    selling_price:
+      row.selling_price == null ? null : asNumber(row.selling_price),
+    is_delivery_package: Boolean(row.is_delivery_package),
+    delivery_package_id: row.delivery_package_id ?? null,
+    selling_price_delivery:
+      row.selling_price_delivery == null
+        ? null
+        : asNumber(row.selling_price_delivery),
+  };
+}
+
+function coerceProductIngredient(row: {
+  quantity?: number | string;
+  is_packaging?: boolean | null;
+}): ProductIngredient {
+  return {
+    ...(row as ProductIngredient),
+    quantity: asNumber(row.quantity ?? 0),
+    is_packaging: Boolean(row.is_packaging),
+  };
+}
+
 function toStockNeed(item: SaleRpcShortage): StockNeed {
   return {
     ingredientId: item.ingredientId,
@@ -56,6 +93,45 @@ function toStockNeed(item: SaleRpcShortage): StockNeed {
     have: asNumber(item.have),
     need: asNumber(item.need),
   };
+}
+
+function fulfillmentLinesFor(
+  productId: string | null | undefined,
+  recipeLines: ProductIngredient[],
+  ingredients: IngredientRow[],
+  purchasesByIngredient: Record<string, PurchaseRound[]>,
+): FulfillmentLine[] {
+  if (!productId) {
+    return [];
+  }
+  return recipeLines.flatMap((line) => {
+    if (line.product_id !== productId) {
+      return [];
+    }
+    const ingredient = ingredients.find((item) => item.id === line.ingredient_id);
+    if (!ingredient) {
+      return [];
+    }
+    return [
+      {
+        ingredientId: ingredient.id,
+        quantity: line.quantity,
+        unitCost: unitCost(
+          effectiveCostInput(
+            {
+              purchasePrice: ingredient.purchase_price,
+              purchaseQuantity: ingredient.purchase_quantity,
+            },
+            purchasesByIngredient[ingredient.id] ?? [],
+          ),
+        ),
+      },
+    ];
+  });
+}
+
+function recipeCount(recipeLines: ProductIngredient[], productId: string): number {
+  return recipeLines.filter((line) => line.product_id === productId).length;
 }
 
 export default function SalesPage() {
@@ -70,6 +146,7 @@ export default function SalesPage() {
   const [productId, setProductId] = useState("");
   const [channelId, setChannelId] = useState("");
   const [quantity, setQuantity] = useState("");
+  const [fulfillment, setFulfillment] = useState<FulfillmentKind>("dine_in");
   const [error, setError] = useState("");
   const [rpcShortages, setRpcShortages] = useState<StockNeed[]>([]);
   const [saving, setSaving] = useState(false);
@@ -111,25 +188,14 @@ export default function SalesPage() {
         setError("โหลดประวัติขายไม่สำเร็จ");
         return;
       }
-      setProducts(
-        (productsRes.data ?? []).map((row) => ({
-          ...row,
-          selling_price:
-            row.selling_price == null ? null : asNumber(row.selling_price),
-        })) as Product[],
-      );
+      setProducts((productsRes.data ?? []).map(coerceProduct));
       setChannels(
         (channelsRes.data ?? []).map((row) => ({
           ...row,
           fee_percent: asNumber(row.fee_percent),
         })) as SalesChannel[],
       );
-      setLines(
-        (linesRes.data ?? []).map((row) => ({
-          ...row,
-          quantity: asNumber(row.quantity),
-        })) as ProductIngredient[],
-      );
+      setLines((linesRes.data ?? []).map(coerceProductIngredient));
       const ingredientRows = (ingredientsRes.data ?? []).flatMap((row) => {
         const unit = asOne<Unit>(row.unit as Unit | Unit[] | null);
         if (!unit) {
@@ -162,6 +228,8 @@ export default function SalesPage() {
           selling_price_each: asNumber(row.selling_price_each),
           fee_percent: asNumber(row.fee_percent),
           product_cost_each: asNumber(row.product_cost_each),
+          fulfillment:
+            row.fulfillment === "delivery" ? "delivery" : "dine_in",
         })),
       );
     } catch {
@@ -173,64 +241,69 @@ export default function SalesPage() {
     void load();
   }, []);
 
-  const selectedProduct = products.find((item) => item.id === productId);
+  const drinkProducts = products.filter((item) => !item.is_delivery_package);
+  const selectedProduct = drinkProducts.find((item) => item.id === productId);
   const selectedChannel = channels.find((item) => item.id === channelId);
   const soldQty = parsePositiveQuantity(quantity);
-  const recipe = selectedProduct
-    ? lines.filter((line) => line.product_id === selectedProduct.id)
-    : [];
-  const recipeReady = recipe.length > 0 && selectedProduct?.selling_price != null;
+  const canDeliver = Boolean(selectedProduct?.delivery_package_id);
+  const drinkLines = fulfillmentLinesFor(
+    selectedProduct?.id,
+    lines,
+    ingredients,
+    purchasesByIngredient,
+  );
+  const packageLines = fulfillmentLinesFor(
+    selectedProduct?.delivery_package_id,
+    lines,
+    ingredients,
+    purchasesByIngredient,
+  );
+  const drinkRecipeCount = selectedProduct
+    ? recipeCount(lines, selectedProduct.id)
+    : 0;
+  const recipeReady =
+    selectedProduct != null &&
+    drinkRecipeCount > 0 &&
+    (fulfillment === "delivery"
+      ? selectedProduct.selling_price_delivery != null && canDeliver
+      : selectedProduct.selling_price != null);
+  const sellingPriceEach =
+    selectedProduct == null
+      ? null
+      : fulfillment === "delivery"
+        ? selectedProduct.selling_price_delivery
+        : selectedProduct.selling_price;
   const needs: StockNeed[] =
     selectedProduct && soldQty != null
-      ? recipe.flatMap((line) => {
-          const ingredient = ingredients.find(
-            (item) => item.id === line.ingredient_id,
-          );
-          if (!ingredient) {
-            return [];
-          }
-          return [
-            {
-              ingredientId: ingredient.id,
-              name: ingredient.name,
-              symbol: ingredient.unit.symbol,
-              have: ingredient.remaining_quantity,
-              need: line.quantity * soldQty,
-            },
-          ];
-        })
+      ? saleNeeds(fulfillment, drinkLines, packageLines, soldQty).flatMap(
+          (need) => {
+            const ingredient = ingredients.find(
+              (item) => item.id === need.ingredientId,
+            );
+            if (!ingredient) {
+              return [];
+            }
+            return [
+              {
+                ingredientId: ingredient.id,
+                name: ingredient.name,
+                symbol: ingredient.unit.symbol,
+                have: ingredient.remaining_quantity,
+                need: need.quantity,
+              },
+            ];
+          },
+        )
       : [];
   const shortages = stockShortages(needs);
-  const productCostEach = selectedProduct
-    ? productCost(
-        recipe.flatMap((line) => {
-          const ingredient = ingredients.find(
-            (item) => item.id === line.ingredient_id,
-          );
-          if (!ingredient) {
-            return [];
-          }
-          return [
-            {
-              ingredient: effectiveCostInput(
-                {
-                  purchasePrice: ingredient.purchase_price,
-                  purchaseQuantity: ingredient.purchase_quantity,
-                },
-                purchasesByIngredient[ingredient.id] ?? [],
-              ),
-              quantity: line.quantity,
-            },
-          ];
-        }),
-      )
-    : 0;
+  const productCostEach =
+    fulfillment === "delivery"
+      ? deliveryCost(drinkLines, packageLines)
+      : dineInCost(drinkLines);
   const previewProfit =
-    selectedProduct?.selling_price != null &&
-    selectedChannel &&
-    soldQty != null
+    sellingPriceEach != null && selectedChannel && soldQty != null
       ? channelProfit(
-          selectedProduct.selling_price * soldQty,
+          sellingPriceEach * soldQty,
           productCostEach * soldQty,
           selectedChannel.fee_percent,
         )
@@ -255,11 +328,15 @@ export default function SalesPage() {
     setError("");
     if (
       !selectedProduct ||
+      selectedProduct.is_delivery_package ||
       !selectedChannel ||
       soldQty == null ||
       !recipeReady ||
-      selectedProduct.selling_price == null
+      sellingPriceEach == null
     ) {
+      return;
+    }
+    if (fulfillment === "delivery" && !selectedProduct.delivery_package_id) {
       return;
     }
     if (shortages.length > 0) {
@@ -287,10 +364,7 @@ export default function SalesPage() {
           .select("*")
           .eq("id", selectedChannel.id)
           .single(),
-        supabase
-          .from("product_ingredients")
-          .select("*")
-          .eq("product_id", selectedProduct.id),
+        supabase.from("product_ingredients").select("*"),
         supabase.from("ingredients").select("*, unit:units(*)"),
         supabase.from("stock_purchases").select("*"),
       ]);
@@ -307,18 +381,19 @@ export default function SalesPage() {
         return;
       }
 
-      const freshProduct = {
-        ...productRes.data,
-        selling_price:
-          productRes.data.selling_price == null
-            ? null
-            : asNumber(productRes.data.selling_price),
-      } as Product;
-      const freshRecipe = (linesRes.data ?? []).map((row) => ({
-        ...row,
-        quantity: asNumber(row.quantity),
-      })) as ProductIngredient[];
-      if (freshProduct.selling_price == null || freshRecipe.length === 0) {
+      const freshProduct = coerceProduct(productRes.data);
+      const freshRecipe = (linesRes.data ?? []).map(coerceProductIngredient);
+      const freshSellingPriceEach =
+        fulfillment === "delivery"
+          ? freshProduct.selling_price_delivery
+          : freshProduct.selling_price;
+      const freshDrinkCount = recipeCount(freshRecipe, freshProduct.id);
+      if (
+        freshProduct.is_delivery_package ||
+        freshSellingPriceEach == null ||
+        freshDrinkCount === 0 ||
+        (fulfillment === "delivery" && !freshProduct.delivery_package_id)
+      ) {
         setError("เมนูนี้ยังไม่มีสูตรหรือยังไม่ตั้งราคาขาย");
         return;
       }
@@ -348,40 +423,46 @@ export default function SalesPage() {
           amount_paid: asNumber(row.amount_paid),
         })),
       );
-      const freshCostLines = freshRecipe.flatMap((line) => {
-        const ingredient = freshIngredients.find(
-          (item) => item.id === line.ingredient_id,
-        );
-        if (!ingredient) {
-          return [];
-        }
-        return [
-          {
-            ingredient: effectiveCostInput(
-              {
-                purchasePrice: ingredient.purchase_price,
-                purchaseQuantity: ingredient.purchase_quantity,
-              },
-              freshPurchases[ingredient.id] ?? [],
-            ),
-            quantity: line.quantity,
-          },
-        ];
-      });
-      if (freshCostLines.length !== freshRecipe.length) {
+      const freshDrinkLines = fulfillmentLinesFor(
+        freshProduct.id,
+        freshRecipe,
+        freshIngredients,
+        freshPurchases,
+      );
+      const freshPackageLines = fulfillmentLinesFor(
+        freshProduct.delivery_package_id,
+        freshRecipe,
+        freshIngredients,
+        freshPurchases,
+      );
+      const freshPackageCount = freshProduct.delivery_package_id
+        ? recipeCount(freshRecipe, freshProduct.delivery_package_id)
+        : 0;
+      if (freshDrinkLines.length !== freshDrinkCount) {
         setError("บันทึกไม่สำเร็จ");
         return;
       }
-      const freshProductCostEach = productCost(freshCostLines);
+      if (
+        fulfillment === "delivery" &&
+        freshPackageLines.length !== freshPackageCount
+      ) {
+        setError("บันทึกไม่สำเร็จ");
+        return;
+      }
+      const freshProductCostEach =
+        fulfillment === "delivery"
+          ? deliveryCost(freshDrinkLines, freshPackageLines)
+          : dineInCost(freshDrinkLines);
       const { data, error: rpcError } = await supabase.rpc(
         "record_stock_sale",
         {
           p_product_id: freshProduct.id,
           p_sales_channel_id: freshChannel.id,
           p_quantity: soldQty,
-          p_selling_price_each: freshProduct.selling_price,
+          p_selling_price_each: freshSellingPriceEach,
           p_fee_percent: freshChannel.fee_percent,
           p_product_cost_each: freshProductCostEach,
+          p_fulfillment: fulfillment,
         },
       );
       if (rpcError) {
@@ -425,16 +506,47 @@ export default function SalesPage() {
           value={productId}
           onChange={(event) => {
             setRpcShortages([]);
+            setFulfillment("dine_in");
             setProductId(event.target.value);
           }}
         >
           <option value="">เลือกเมนู</option>
-          {products.map((item) => (
+          {drinkProducts.map((item) => (
             <option key={item.id} value={item.id}>
               {item.name}
             </option>
           ))}
         </select>
+        <fieldset>
+          <legend>รูปแบบการขาย</legend>
+          <label>
+            <input
+              type="radio"
+              name="sale-fulfillment"
+              checked={fulfillment === "dine_in"}
+              onChange={() => {
+                setRpcShortages([]);
+                setFulfillment("dine_in");
+              }}
+              style={{ width: "auto" }}
+            />
+            หน้าร้าน
+          </label>
+          <label>
+            <input
+              type="radio"
+              name="sale-fulfillment"
+              checked={fulfillment === "delivery"}
+              disabled={!canDeliver}
+              onChange={() => {
+                setRpcShortages([]);
+                setFulfillment("delivery");
+              }}
+              style={{ width: "auto" }}
+            />
+            เดลิเวอรี
+          </label>
+        </fieldset>
         <label htmlFor="sale-qty">จำนวน</label>
         <input
           id="sale-qty"
@@ -478,11 +590,10 @@ export default function SalesPage() {
                 </li>
               ))}
             </ul>
-            {previewProfit && selectedProduct.selling_price != null ? (
+            {previewProfit && sellingPriceEach != null ? (
               <ul>
                 <li>
-                  ยอดขาย{" "}
-                  {formatBaht(selectedProduct.selling_price * soldQty)} บาท
+                  ยอดขาย {formatBaht(sellingPriceEach * soldQty)} บาท
                 </li>
                 <li>
                   GP {selectedChannel?.fee_percent}% ={" "}
