@@ -39,6 +39,17 @@ as $$
 declare
   v_is_pkg boolean;
 begin
+  if tg_op = 'UPDATE'
+     and old.is_delivery_package is true
+     and new.is_delivery_package is false
+     and exists (
+       select 1
+       from products
+       where delivery_package_id = new.id
+     ) then
+    raise exception 'cannot unset is_delivery_package while products still reference it';
+  end if;
+
   if new.delivery_package_id is not null and new.delivery_package_id = new.id then
     raise exception 'delivery_package_id cannot reference the same product';
   end if;

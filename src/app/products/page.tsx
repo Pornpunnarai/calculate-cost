@@ -264,6 +264,7 @@ export default function ProductsPage() {
           existingLines={
             editing ? lines.filter((line) => line.product_id === editing.id) : []
           }
+          products={products}
           onSaved={() => {
             setCreating(false);
             setEditing(null);

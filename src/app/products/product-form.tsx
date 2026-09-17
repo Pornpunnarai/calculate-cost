@@ -35,7 +35,7 @@ type ProfitTarget = {
 };
 
 const SUGGEST_ERROR =
-  "ตั้งเป้ากำไรต่ำกว่านี้ เพราะบวก GP แล้วเต็มหรือเกิน 100%";
+  "กรอกเป้ากำไรให้ถูก หรือตั้งต่ำกว่านี้ เพราะบวก GP แล้วเต็มหรือเกิน 100%";
 
 function emptyProfitTarget(channels: SalesChannel[]): ProfitTarget {
   return {
@@ -263,6 +263,7 @@ export function ProductForm({
   packageLinesByProductId,
   existing,
   existingLines,
+  products,
   onSaved,
   onCancel,
 }: {
@@ -273,6 +274,7 @@ export function ProductForm({
   packageLinesByProductId: Record<string, ProductIngredient[]>;
   existing: Product | null;
   existingLines: ProductIngredient[];
+  products: Product[];
   onSaved: () => void;
   onCancel: () => void;
 }) {
@@ -403,6 +405,14 @@ export function ProductForm({
         setError("กรอกชื่อเมนู");
         return;
       }
+      if (
+        existing?.is_delivery_package &&
+        !isDeliveryPackage &&
+        products.some((item) => item.delivery_package_id === existing.id)
+      ) {
+        setError("เลิกเป็นชุดแพ็กส่งไม่ได้ เพราะมีเมนูใช้อยู่");
+        return;
+      }
       if (isDeliveryPackage && lines.length === 0) {
         setError("ใส่ของในชุดแพ็กส่ง");
         return;
@@ -528,6 +538,14 @@ export function ProductForm({
           checked={isDeliveryPackage}
           onChange={(event) => {
             const checked = event.target.checked;
+            if (
+              !checked &&
+              existing?.is_delivery_package &&
+              products.some((item) => item.delivery_package_id === existing.id)
+            ) {
+              setError("เลิกเป็นชุดแพ็กส่งไม่ได้ เพราะมีเมนูใช้อยู่");
+              return;
+            }
             setIsDeliveryPackage(checked);
             if (checked) {
               setDeliveryPackageId("");

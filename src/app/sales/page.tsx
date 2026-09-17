@@ -471,7 +471,12 @@ export default function SalesPage() {
       }
       const result = data as SaleRpcResult | null;
       if (result?.ok === false) {
-        setRpcShortages((result.shortages ?? []).map(toStockNeed));
+        const rpcShortageRows = result.shortages ?? [];
+        if (rpcShortageRows.length === 0) {
+          setError("บันทึกไม่สำเร็จ");
+          return;
+        }
+        setRpcShortages(rpcShortageRows.map(toStockNeed));
         return;
       }
       if (!result?.ok) {
