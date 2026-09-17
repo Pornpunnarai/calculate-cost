@@ -7,8 +7,10 @@
 3. จากนั้นรันไฟล์ `supabase/migrations/20260909000000_buy_sell.sql` ใน SQL Editor เช่นกัน
 4. จากนั้นรันไฟล์ `supabase/migrations/20260909110000_purchase_first_warehouse.sql`
 5. จากนั้นรันไฟล์ `supabase/migrations/20260917100000_purchase_row_edit.sql`
-6. คัดลอก Project URL และ anon key
-7. สร้าง `.env.local` จาก `.env.example` แล้วใส่ค่าจริง
+6. จากนั้นรันไฟล์ `supabase/migrations/20260918000000_purchase_edit_security_definer.sql`
+7. จากนั้นรันไฟล์ `supabase/migrations/20260918100000_menu_packaging_delivery.sql`
+8. คัดลอก Project URL และ anon key
+9. สร้าง `.env.local` จาก `.env.example` แล้วใส่ค่าจริง
 
 ## รันบนเครื่อง
 
