@@ -4,6 +4,9 @@ import {
   channelProfit,
   lineCost,
   productCost,
+  profitPercent,
+  sellingPriceFromMarginPercent,
+  sellingPriceFromProfitBaht,
   unitCost,
 } from "./costing";
 
@@ -73,5 +76,33 @@ describe("channelProfit", () => {
     expect(formatBaht(result!.channelFee)).toBe("0.00");
     expect(formatBaht(result!.netReceived)).toBe("80.00");
     expect(formatBaht(result!.netProfit)).toBe("55.00");
+  });
+});
+
+describe("profitPercent", () => {
+  it("is net profit over selling price", () => {
+    expect(profitPercent(20, 100)).toBe(0.2);
+  });
+});
+
+describe("sellingPriceFromMarginPercent", () => {
+  it("cost 50 GP 32% margin 20% is 104.17", () => {
+    expect(formatBaht(sellingPriceFromMarginPercent(50, 32, 20)!)).toBe(
+      "104.17",
+    );
+  });
+
+  it("returns null when GP plus margin covers 100%", () => {
+    expect(sellingPriceFromMarginPercent(50, 32, 70)).toBeNull();
+  });
+});
+
+describe("sellingPriceFromProfitBaht", () => {
+  it("cost 50 GP 32% profit 15 is 95.59", () => {
+    expect(formatBaht(sellingPriceFromProfitBaht(50, 32, 15)!)).toBe("95.59");
+  });
+
+  it("returns null when GP is 100%", () => {
+    expect(sellingPriceFromProfitBaht(50, 100, 15)).toBeNull();
   });
 });
