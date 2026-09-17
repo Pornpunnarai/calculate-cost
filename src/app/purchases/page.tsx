@@ -16,6 +16,12 @@ import type {
   StockPurchase,
   Unit,
 } from "@/lib/types";
+import {
+  purchaseFormLoadError,
+  sourceChoicesForForm,
+  unresolvedPurchaseSourceMessage,
+  unitsForPurchaseForm,
+} from "@/lib/purchase-load";
 import { isPositiveNumber } from "@/lib/validation";
 
 type IngredientRow = Ingredient & { unit: Unit };
@@ -41,10 +47,15 @@ export default function PurchasesPage() {
   const [purchasedAt, setPurchasedAt] = useState(todayIsoDate);
   const [listPrice, setListPrice] = useState("");
   const [amountPaid, setAmountPaid] = useState("");
-  const [sourceId, setSourceId] = useState("");
+  const [sourceId, setSourceId] = useState("Makro");
   const [sourceName, setSourceName] = useState("");
   const [error, setError] = useState("");
   const [saving, setSaving] = useState(false);
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const [editPurchasedAt, setEditPurchasedAt] = useState("");
+  const [editQuantity, setEditQuantity] = useState("");
+  const [editListPrice, setEditListPrice] = useState("");
+  const [editAmountPaid, setEditAmountPaid] = useState("");
 
   const listPriceNumber = Number(listPrice);
   const paidNumber = Number(amountPaid);
@@ -70,44 +81,65 @@ export default function PurchasesPage() {
           supabase.from("units").select("*").order("created_at"),
           supabase.from("purchase_sources").select("*").order("created_at"),
         ]);
-      if (
-        ingredientsRes.error ||
-        purchasesRes.error ||
-        unitsRes.error ||
-        sourcesRes.error
-      ) {
-        setError("โหลดประวัติซื้อไม่สำเร็จ");
-        return;
-      }
-      const ingredientRows = (ingredientsRes.data ?? []).flatMap((row) => {
-        const unit = asOne<Unit>(row.unit as Unit | Unit[] | null);
-        if (!unit) {
-          return [];
-        }
-        return [
-          {
-            ...row,
-            unit,
-            purchase_quantity: asNumber(row.purchase_quantity),
-            purchase_price: asNumber(row.purchase_price),
-            remaining_quantity: asNumber(row.remaining_quantity ?? 0),
-          } as IngredientRow,
-        ];
+      const unitList = unitsForPurchaseForm({
+        rows: (unitsRes.data ?? []) as Unit[],
+        failed: Boolean(unitsRes.error),
       });
-      setItems(ingredientRows);
-      if (!ingredientId && ingredientRows[0]) {
-        setIngredientId(ingredientRows[0].id);
-      }
-      const unitList = (unitsRes.data ?? []) as Unit[];
       setUnits(unitList);
-      if (!unitId && unitList[0]) {
-        setUnitId(unitList[0].id);
+      setUnitId((current) =>
+        current && unitList.some((unit) => unit.id === current)
+          ? current
+          : (unitList[0]?.id ?? ""),
+      );
+
+      if (!ingredientsRes.error) {
+        const ingredientRows = (ingredientsRes.data ?? []).flatMap((row) => {
+          const unit = asOne<Unit>(row.unit as Unit | Unit[] | null);
+          if (!unit) {
+            return [];
+          }
+          return [
+            {
+              ...row,
+              unit,
+              purchase_quantity: asNumber(row.purchase_quantity),
+              purchase_price: asNumber(row.purchase_price),
+              remaining_quantity: asNumber(row.remaining_quantity ?? 0),
+            } as IngredientRow,
+          ];
+        });
+        setItems(ingredientRows);
+        setIngredientId((current) =>
+          current && ingredientRows.some((item) => item.id === current)
+            ? current
+            : (ingredientRows[0]?.id ?? ""),
+        );
+      }
+
+      const historyFailed = Boolean(purchasesRes.error || sourcesRes.error);
+      setError(
+        purchaseFormLoadError({
+          unitsFailed: Boolean(unitsRes.error),
+          historyFailed,
+        }),
+      );
+      if (historyFailed) {
+        const fallback = sourceChoicesForForm([]);
+        setSourceId((current) =>
+          current && fallback.some((source) => source.id === current)
+            ? current
+            : (fallback[0]?.id ?? ""),
+        );
+        return;
       }
       const sourceList = (sourcesRes.data ?? []) as PurchaseSource[];
       setSources(sourceList);
-      if (!sourceId && sourceList[0]) {
-        setSourceId(sourceList[0].id);
-      }
+      const sourceChoices = sourceChoicesForForm(sourceList);
+      setSourceId((current) =>
+        current && sourceChoices.some((source) => source.id === current)
+          ? current
+          : (sourceChoices[0]?.id ?? ""),
+      );
       setPurchases(
         ((purchasesRes.data ?? []) as Array<
           StockPurchase & {
@@ -138,7 +170,9 @@ export default function PurchasesPage() {
 
   async function resolveSourceId(): Promise<string | null> {
     const supabase = createBrowserClient();
-    const typed = sourceName.trim();
+    const typed = sourceName.trim() || (!sources.some((source) => source.id === sourceId)
+      ? sourceId.trim()
+      : "");
     if (typed) {
       const existing = sources.find((source) => source.name === typed);
       if (existing) {
@@ -194,7 +228,9 @@ export default function PurchasesPage() {
     try {
       const resolvedSourceId = await resolveSourceId();
       if (!resolvedSourceId) {
-        setError("กรอกวันที่ซื้อและแหล่งซื้อ");
+        setError(
+          unresolvedPurchaseSourceMessage(Boolean(sourceName.trim() || sourceId)),
+        );
         return;
       }
       const supabase = createBrowserClient();
@@ -225,7 +261,116 @@ export default function PurchasesPage() {
     }
   }
 
+  function startEdit(row: PurchaseRow) {
+    setError("");
+    setEditingId(row.id);
+    setEditPurchasedAt(
+      displayedPurchaseDate(row.purchased_at, row.created_at),
+    );
+    setEditQuantity(String(row.quantity));
+    setEditListPrice(String(displayedListPrice(row.list_price, row.amount_paid)));
+    setEditAmountPaid(String(row.amount_paid));
+  }
+
+  function cancelEdit() {
+    setEditingId(null);
+  }
+
+  async function saveEdit(row: PurchaseRow) {
+    const qty = Number(editQuantity);
+    const list = Number(editListPrice);
+    const paid = Number(editAmountPaid);
+    if (!editPurchasedAt.trim()) {
+      setError("กรอกวันที่ซื้อและแหล่งซื้อ");
+      return;
+    }
+    if (!isPositiveNumber(qty)) {
+      setError("ปริมาณต้องมากกว่า 0");
+      return;
+    }
+    if (!isValidPurchaseMoney(list, paid)) {
+      setError("กรอกราคาเต็มและเงินที่จ่ายให้ถูกต้อง");
+      return;
+    }
+    setSaving(true);
+    setError("");
+    try {
+      const supabase = createBrowserClient();
+      const { data, error: rpcError } = await supabase.rpc(
+        "update_stock_purchase",
+        {
+          p_id: row.id,
+          p_purchased_at: editPurchasedAt,
+          p_quantity: qty,
+          p_amount_paid: paid,
+          p_list_price: list,
+        },
+      );
+      if (rpcError) {
+        setError("บันทึกไม่สำเร็จ");
+        return;
+      }
+      const payload = data as { ok?: boolean; reason?: string } | null;
+      if (payload && payload.ok === false && payload.reason === "shortage") {
+        setError("แก้ไม่ได้ คงเหลือจะไม่พอ");
+        return;
+      }
+      if (!payload || payload.ok !== true) {
+        setError("บันทึกไม่สำเร็จ");
+        return;
+      }
+      setEditingId(null);
+      await load();
+    } catch {
+      setError("บันทึกไม่สำเร็จ");
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  async function removePurchase(row: PurchaseRow) {
+    if (!window.confirm("ลบรอบซื้อนี้?")) {
+      return;
+    }
+    setSaving(true);
+    setError("");
+    try {
+      const supabase = createBrowserClient();
+      const { data, error: rpcError } = await supabase.rpc(
+        "delete_stock_purchase",
+        { p_id: row.id },
+      );
+      if (rpcError) {
+        setError("ลบไม่สำเร็จ");
+        return;
+      }
+      const payload = data as { ok?: boolean; reason?: string } | null;
+      if (payload && payload.ok === false && payload.reason === "shortage") {
+        setError("ลบไม่ได้ คงเหลือจะไม่พอ");
+        return;
+      }
+      if (!payload || payload.ok !== true) {
+        setError("ลบไม่สำเร็จ");
+        return;
+      }
+      if (editingId === row.id) {
+        setEditingId(null);
+      }
+      await load();
+    } catch {
+      setError("ลบไม่สำเร็จ");
+    } finally {
+      setSaving(false);
+    }
+  }
+
   const itemsById = Object.fromEntries(items.map((item) => [item.id, item]));
+  const sourceChoices = sourceChoicesForForm(sources);
+  const editListNumber = Number(editListPrice);
+  const editPaidNumber = Number(editAmountPaid);
+  const editDiscount = isValidPurchaseMoney(editListNumber, editPaidNumber)
+    ? purchaseDiscount(editListNumber, editPaidNumber)
+    : null;
 
   return (
     <section>
@@ -266,6 +411,7 @@ export default function PurchasesPage() {
               id="purchase-unit"
               value={unitId}
               onChange={(event) => setUnitId(event.target.value)}
+              disabled={units.length === 0}
             >
               {units.map((unit) => (
                 <option key={unit.id} value={unit.id}>
@@ -273,6 +419,9 @@ export default function PurchasesPage() {
                 </option>
               ))}
             </select>
+            {units.length === 0 ? (
+              <p className="muted">ยังไม่มีหน่วย ให้ไปเพิ่มที่หน้าหน่วยก่อน</p>
+            ) : null}
           </>
         ) : (
           <>
@@ -328,7 +477,7 @@ export default function PurchasesPage() {
           value={sourceId}
           onChange={(event) => setSourceId(event.target.value)}
         >
-          {sources.map((source) => (
+          {sourceChoices.map((source) => (
             <option key={source.id} value={source.id}>
               {source.name}
             </option>
@@ -356,6 +505,7 @@ export default function PurchasesPage() {
             <th>ส่วนลด</th>
             <th>คงเหลือหลังซื้อ</th>
             <th>ต้นทุนเฉลี่ยหลังซื้อ</th>
+            <th></th>
           </tr>
         </thead>
         <tbody>
@@ -366,20 +516,80 @@ export default function PurchasesPage() {
               row.list_price,
               row.amount_paid,
             );
+            const isEditing = editingId === row.id;
             return (
               <tr key={row.id}>
                 <td>
-                  {displayedPurchaseDate(row.purchased_at, row.created_at)}
+                  {isEditing ? (
+                    <input
+                      type="date"
+                      value={editPurchasedAt}
+                      onChange={(event) =>
+                        setEditPurchasedAt(event.target.value)
+                      }
+                    />
+                  ) : (
+                    displayedPurchaseDate(row.purchased_at, row.created_at)
+                  )}
                 </td>
                 <td>{ingredient?.name ?? "—"}</td>
                 <td>{row.source?.name ?? "—"}</td>
                 <td>
-                  {row.quantity} {symbol}
+                  {isEditing ? (
+                    <>
+                      <input
+                        type="number"
+                        min="0"
+                        step="any"
+                        value={editQuantity}
+                        onChange={(event) =>
+                          setEditQuantity(event.target.value)
+                        }
+                      />{" "}
+                      {symbol}
+                    </>
+                  ) : (
+                    <>
+                      {row.quantity} {symbol}
+                    </>
+                  )}
                 </td>
-                <td>{formatBaht(shownList)} บาท</td>
-                <td>{formatBaht(row.amount_paid)} บาท</td>
                 <td>
-                  {formatBaht(purchaseDiscount(shownList, row.amount_paid))} บาท
+                  {isEditing ? (
+                    <input
+                      type="number"
+                      min="0"
+                      step="any"
+                      value={editListPrice}
+                      onChange={(event) =>
+                        setEditListPrice(event.target.value)
+                      }
+                    />
+                  ) : (
+                    `${formatBaht(shownList)} บาท`
+                  )}
+                </td>
+                <td>
+                  {isEditing ? (
+                    <input
+                      type="number"
+                      min="0"
+                      step="any"
+                      value={editAmountPaid}
+                      onChange={(event) =>
+                        setEditAmountPaid(event.target.value)
+                      }
+                    />
+                  ) : (
+                    `${formatBaht(row.amount_paid)} บาท`
+                  )}
+                </td>
+                <td>
+                  {isEditing
+                    ? editDiscount == null
+                      ? "—"
+                      : `${formatBaht(editDiscount)} บาท`
+                    : `${formatBaht(purchaseDiscount(shownList, row.amount_paid))} บาท`}
                 </td>
                 <td>
                   {row.remaining_after} {symbol}
@@ -387,6 +597,43 @@ export default function PurchasesPage() {
                 <td>
                   {formatBaht(row.unit_cost_after)} บาท
                   {symbol ? `/${symbol}` : ""}
+                </td>
+                <td>
+                  {isEditing ? (
+                    <>
+                      <button
+                        type="button"
+                        onClick={() => void saveEdit(row)}
+                        disabled={saving}
+                      >
+                        บันทึก
+                      </button>
+                      <button
+                        type="button"
+                        onClick={cancelEdit}
+                        disabled={saving}
+                      >
+                        ยกเลิก
+                      </button>
+                    </>
+                  ) : (
+                    <>
+                      <button
+                        type="button"
+                        onClick={() => startEdit(row)}
+                        disabled={saving}
+                      >
+                        แก้ไข
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => void removePurchase(row)}
+                        disabled={saving}
+                      >
+                        ลบ
+                      </button>
+                    </>
+                  )}
                 </td>
               </tr>
             );
