@@ -6,8 +6,9 @@
 2. เปิด SQL Editor แล้วรันไฟล์ `supabase/migrations/20260908000000_init.sql`
 3. จากนั้นรันไฟล์ `supabase/migrations/20260909000000_buy_sell.sql` ใน SQL Editor เช่นกัน
 4. จากนั้นรันไฟล์ `supabase/migrations/20260909110000_purchase_first_warehouse.sql`
-5. คัดลอก Project URL และ anon key
-6. สร้าง `.env.local` จาก `.env.example` แล้วใส่ค่าจริง
+5. จากนั้นรันไฟล์ `supabase/migrations/20260917100000_purchase_row_edit.sql`
+6. คัดลอก Project URL และ anon key
+7. สร้าง `.env.local` จาก `.env.example` แล้วใส่ค่าจริง
 
 ## รันบนเครื่อง
 
