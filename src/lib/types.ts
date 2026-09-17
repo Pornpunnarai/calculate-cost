@@ -21,6 +21,9 @@ export type Product = {
   id: string;
   name: string;
   selling_price: number | null;
+  is_delivery_package: boolean;
+  delivery_package_id: string | null;
+  selling_price_delivery: number | null;
   created_at: string;
   updated_at: string;
 };
@@ -30,6 +33,7 @@ export type ProductIngredient = {
   product_id: string;
   ingredient_id: string;
   quantity: number;
+  is_packaging: boolean;
 };
 
 export type SalesChannel = {
@@ -69,5 +73,6 @@ export type StockSale = {
   selling_price_each: number;
   fee_percent: number;
   product_cost_each: number;
+  fulfillment: "dine_in" | "delivery";
   created_at: string;
 };
