@@ -1,3 +1,5 @@
+// Replay sort and remaining_after/unit_cost_after must match
+// rebuild_stock_purchases in supabase/migrations/20260917100000_purchase_row_edit.sql.
 export type PurchaseRevisionRound = {
   id: string;
   quantity: number;

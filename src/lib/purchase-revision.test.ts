@@ -5,6 +5,7 @@ import {
   remainingAfterChange,
   replayPurchaseRounds,
   soldQuantity,
+  sortPurchaseRounds,
   type PurchaseRevisionRound,
 } from "./purchase-revision";
 
@@ -37,6 +38,37 @@ describe("remainingAfterChange", () => {
     const next = remainingAfterChange(100, sold);
     expect(next).toBe(50);
     expect(canApplyPurchaseChange(next)).toBe(true);
+  });
+});
+
+describe("sortPurchaseRounds", () => {
+  it("sorts unsorted rounds by purchased date, created_at, then id", () => {
+    const sorted = sortPurchaseRounds([
+      round("c", 10, 40, "2026-09-02", "2026-09-02T11:00:00Z"),
+      round("a", 10, 40, "2026-09-01", "2026-09-01T10:00:00Z"),
+      round("b", 10, 40, "2026-09-02", "2026-09-02T10:00:00Z"),
+    ]);
+    expect(sorted.map((item) => item.id)).toEqual(["a", "b", "c"]);
+  });
+
+  it("falls back to createdAt date when purchasedAt is null", () => {
+    const sorted = sortPurchaseRounds([
+      {
+        id: "later",
+        quantity: 10,
+        amountPaid: 40,
+        purchasedAt: null,
+        createdAt: "2026-09-03T08:00:00Z",
+      },
+      {
+        id: "earlier",
+        quantity: 10,
+        amountPaid: 40,
+        purchasedAt: "2026-09-01",
+        createdAt: "2026-09-04T08:00:00Z",
+      },
+    ]);
+    expect(sorted.map((item) => item.id)).toEqual(["earlier", "later"]);
   });
 });
 

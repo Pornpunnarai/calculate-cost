@@ -38,15 +38,19 @@ begin
     update ingredients
     set remaining_quantity = v_qty_sum - p_sold,
         purchase_quantity = v_last_qty,
-        purchase_price = v_last_paid
+        purchase_price = v_last_paid,
+        updated_at = now()
     where id = p_ingredient_id;
   else
     update ingredients
-    set remaining_quantity = 0
+    set remaining_quantity = 0,
+        updated_at = now()
     where id = p_ingredient_id;
   end if;
 end;
 $$;
+
+revoke execute on function rebuild_stock_purchases(uuid, numeric) from public, anon, authenticated;
 
 create or replace function update_stock_purchase(
   p_id uuid,
@@ -76,8 +80,8 @@ begin
     raise exception 'invalid purchase money';
   end if;
 
-  select ingredient_id, quantity
-    into v_ingredient_id, v_old_qty
+  select ingredient_id
+    into v_ingredient_id
   from stock_purchases
   where id = p_id;
 
@@ -86,6 +90,15 @@ begin
   end if;
 
   perform 1 from ingredients where id = v_ingredient_id for update;
+
+  select ingredient_id, quantity
+    into v_ingredient_id, v_old_qty
+  from stock_purchases
+  where id = p_id;
+
+  if v_ingredient_id is null then
+    raise exception 'purchase not found';
+  end if;
 
   select remaining_quantity into v_remaining
   from ingredients where id = v_ingredient_id;
@@ -127,8 +140,8 @@ declare
   v_sold numeric;
   v_new_remaining numeric;
 begin
-  select ingredient_id, quantity
-    into v_ingredient_id, v_old_qty
+  select ingredient_id
+    into v_ingredient_id
   from stock_purchases
   where id = p_id;
 
@@ -137,6 +150,15 @@ begin
   end if;
 
   perform 1 from ingredients where id = v_ingredient_id for update;
+
+  select ingredient_id, quantity
+    into v_ingredient_id, v_old_qty
+  from stock_purchases
+  where id = p_id;
+
+  if v_ingredient_id is null then
+    raise exception 'purchase not found';
+  end if;
 
   select remaining_quantity into v_remaining
   from ingredients where id = v_ingredient_id;

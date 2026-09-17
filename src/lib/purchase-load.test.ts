@@ -61,9 +61,23 @@ describe("unresolvedPurchaseSourceMessage", () => {
 describe("purchaseFormLoadError", () => {
   it("still explains history failure without blocking unit catalog", () => {
     expect(
-      purchaseFormLoadError({ unitsFailed: false, historyFailed: true }),
+      purchaseFormLoadError({
+        unitsFailed: false,
+        ingredientsFailed: false,
+        historyFailed: true,
+      }),
     ).toBe(
       "โหลดประวัติซื้อไม่สำเร็จ ถ้าเพิ่งอัปเดต ให้รันไฟล์ SQL คลังซื้อเข้าใน Supabase",
     );
+  });
+
+  it("reports ingredients failure before history failure", () => {
+    expect(
+      purchaseFormLoadError({
+        unitsFailed: false,
+        ingredientsFailed: true,
+        historyFailed: true,
+      }),
+    ).toBe("โหลดวัตถุดิบไม่สำเร็จ");
   });
 });

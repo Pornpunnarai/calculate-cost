@@ -120,6 +120,7 @@ export default function PurchasesPage() {
       setError(
         purchaseFormLoadError({
           unitsFailed: Boolean(unitsRes.error),
+          ingredientsFailed: Boolean(ingredientsRes.error),
           historyFailed,
         }),
       );
@@ -273,23 +274,28 @@ export default function PurchasesPage() {
   }
 
   function cancelEdit() {
+    setError("");
     setEditingId(null);
   }
 
   async function saveEdit(row: PurchaseRow) {
+    if (saving) {
+      return;
+    }
     const qty = Number(editQuantity);
     const list = Number(editListPrice);
     const paid = Number(editAmountPaid);
-    if (!editPurchasedAt.trim()) {
+    if (
+      !isPositiveNumber(qty) ||
+      !isValidPurchaseMoney(list, paid)
+    ) {
+      setError(
+        "กรอกปริมาณ ราคาเต็ม และเงินที่จ่ายให้มากกว่า 0 และเงินที่จ่ายต้องไม่เกินราคาเต็ม",
+      );
+      return;
+    }
+    if (!editPurchasedAt) {
       setError("กรอกวันที่ซื้อและแหล่งซื้อ");
-      return;
-    }
-    if (!isPositiveNumber(qty)) {
-      setError("ปริมาณต้องมากกว่า 0");
-      return;
-    }
-    if (!isValidPurchaseMoney(list, paid)) {
-      setError("กรอกราคาเต็มและเงินที่จ่ายให้ถูกต้อง");
       return;
     }
     setSaving(true);
@@ -330,6 +336,9 @@ export default function PurchasesPage() {
 
   async function removePurchase(row: PurchaseRow) {
     if (!window.confirm("ลบรอบซื้อนี้?")) {
+      return;
+    }
+    if (saving) {
       return;
     }
     setSaving(true);

@@ -26,10 +26,14 @@ export function unitsForPurchaseForm<T>(units: {
 
 export function purchaseFormLoadError(args: {
   unitsFailed: boolean;
+  ingredientsFailed: boolean;
   historyFailed: boolean;
 }): string {
   if (args.unitsFailed) {
     return "โหลดหน่วยไม่สำเร็จ";
+  }
+  if (args.ingredientsFailed) {
+    return "โหลดวัตถุดิบไม่สำเร็จ";
   }
   if (args.historyFailed) {
     return "โหลดประวัติซื้อไม่สำเร็จ ถ้าเพิ่งอัปเดต ให้รันไฟล์ SQL คลังซื้อเข้าใน Supabase";
